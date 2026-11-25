@@ -1,0 +1,99 @@
+<mujoco model="aegis_rover_arena">
+  <compiler angle="degree" coordinate="local" inertiafromgeom="false"/>
+  <option timestep="0.005" gravity="0 0 -9.81" integrator="RK4"/>
+
+  <visual>
+    <global offwidth="640" offheight="480"/>
+    <headlight ambient="0.45 0.45 0.48" diffuse="0.75 0.75 0.75" specular="0.2 0.2 0.2"/>
+    <rgba haze="0.12 0.16 0.22 1"/>
+  </visual>
+
+  <asset>
+    <texture name="grid_tex" type="2d" builtin="checker" width="512" height="512"
+             rgb1="0.14 0.17 0.21" rgb2="0.20 0.24 0.29"/>
+    <material name="arena_floor" texture="grid_tex" texrepeat="12 12" reflectance="0.08"/>
+    <material name="pillar_mat" rgba="0.28 0.36 0.46 1" shininess="0.3"/>
+    <material name="chassis_mat" rgba="0.16 0.20 0.24 1" shininess="0.6"/>
+    <material name="wheel_mat" rgba="0.10 0.11 0.12 1" shininess="0.2"/>
+    <material name="sensor_mat" rgba="0.10 0.75 0.95 1" shininess="0.7"/>
+    <material name="target_mat" rgba="1.0 0.14 0.04 1" emission="0.45" shininess="0.8"/>
+  </asset>
+
+  <worldbody>
+    <light name="top_sun" pos="0 0 12" dir="0 0 -1" directional="true" diffuse="0.85 0.85 0.85"/>
+    <geom name="floor" type="plane" size="18 18 0.1" material="arena_floor" friction="1.2 0.01 0.005"/>
+
+    <!-- Cylindrical Arena Obstacles -->
+    <geom name="obs_0" type="cylinder" pos="2.4  1.6 0.8" size="0.30 0.8" material="pillar_mat"/>
+    <geom name="obs_1" type="cylinder" pos="2.4 -1.6 0.8" size="0.30 0.8" material="pillar_mat"/>
+    <geom name="obs_2" type="cylinder" pos="-2.4 1.6 0.8" size="0.30 0.8" material="pillar_mat"/>
+    <geom name="obs_3" type="cylinder" pos="-2.4 -1.6 0.8" size="0.30 0.8" material="pillar_mat"/>
+
+    <!-- Ground-Level Evasive Target Beacon -->
+    <body name="target_beacon" mocap="true" pos="2.6 0.0 0.32">
+      <geom name="target_sphere" type="sphere" size="0.28" material="target_mat" contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- 4-Wheel Ackermann Autonomous Ground Rover (Wheelbase = 0.36 m, Track = 0.30 m, Wheel R = 0.09 m) -->
+    <!-- Named "quadrotor" alias kept compatible via body lookup ("ackermann_rover") -->
+    <body name="ackermann_rover" pos="0.0 0.0 0.14">
+      <freejoint name="rover_root"/>
+      <inertial pos="0 0 0" mass="4.2" diaginertia="0.045 0.085 0.110"/>
+
+      <geom name="rover_chassis" type="box" size="0.20 0.085 0.04" material="chassis_mat" contype="0" conaffinity="0"/>
+      <geom name="sensor_mast" type="box" pos="0.15 0 0.075" size="0.03 0.04 0.035" material="sensor_mat" contype="0" conaffinity="0"/>
+
+      <!-- Forward-Facing Wide-FOV RGB-D Camera (+X forward) -->
+      <camera name="fpv_rgb" pos="0.20 0.0 0.11" fovy="68" xyaxes="0 -1 0 0 0 1"/>
+
+      <!-- Front-Left Steered Knuckle + Wheel -->
+      <body name="knuckle_fl" pos="0.18 0.15 -0.05">
+        <inertial pos="0 0 0" mass="0.15" diaginertia="0.0005 0.0005 0.0005"/>
+        <joint name="steer_fl" type="hinge" axis="0 0 1" limited="true" range="-38 38" damping="0.8"/>
+        <body name="wheel_fl_body" pos="0 0 0">
+          <inertial pos="0 0 0" mass="0.35" diaginertia="0.0014 0.0022 0.0014"/>
+          <joint name="spin_fl" type="hinge" axis="0 1 0" damping="0.02"/>
+          <geom name="geom_wheel_fl" type="cylinder" size="0.09 0.032" euler="90 0 0"
+                material="wheel_mat" friction="1.3 0.01 0.005"/>
+        </body>
+      </body>
+
+      <!-- Front-Right Steered Knuckle + Wheel -->
+      <body name="knuckle_fr" pos="0.18 -0.15 -0.05">
+        <inertial pos="0 0 0" mass="0.15" diaginertia="0.0005 0.0005 0.0005"/>
+        <joint name="steer_fr" type="hinge" axis="0 0 1" limited="true" range="-38 38" damping="0.8"/>
+        <body name="wheel_fr_body" pos="0 0 0">
+          <inertial pos="0 0 0" mass="0.35" diaginertia="0.0014 0.0022 0.0014"/>
+          <joint name="spin_fr" type="hinge" axis="0 1 0" damping="0.02"/>
+          <geom name="geom_wheel_fr" type="cylinder" size="0.09 0.032" euler="90 0 0"
+                material="wheel_mat" friction="1.3 0.01 0.005"/>
+        </body>
+      </body>
+
+      <!-- Rear-Left Driven Wheel -->
+      <body name="wheel_rl_body" pos="-0.18 0.15 -0.05">
+        <inertial pos="0 0 0" mass="0.35" diaginertia="0.0014 0.0022 0.0014"/>
+        <joint name="spin_rl" type="hinge" axis="0 1 0" damping="0.05"/>
+        <geom name="geom_wheel_rl" type="cylinder" size="0.09 0.032" euler="90 0 0"
+              material="wheel_mat" friction="1.3 0.01 0.005"/>
+      </body>
+
+      <!-- Rear-Right Driven Wheel -->
+      <body name="wheel_rr_body" pos="-0.18 -0.15 -0.05">
+        <inertial pos="0 0 0" mass="0.35" diaginertia="0.0014 0.0022 0.0014"/>
+        <joint name="spin_rr" type="hinge" axis="0 1 0" damping="0.05"/>
+        <geom name="geom_wheel_rr" type="cylinder" size="0.09 0.032" euler="90 0 0"
+              material="wheel_mat" friction="1.3 0.01 0.005"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- Actuators 0 & 1: Inner/Outer Ackermann Steering Servos [rad] -->
+    <position name="act_steer_fl" joint="steer_fl" kp="18.0" ctrllimited="true" ctrlrange="-0.66 0.66"/>
+    <position name="act_steer_fr" joint="steer_fr" kp="18.0" ctrllimited="true" ctrlrange="-0.66 0.66"/>
+    <!-- Actuators 2 & 3: Rear-Wheel Drive Torque Motors [N*m] -->
+    <motor name="act_drive_rl" joint="spin_rl" gear="1.0" ctrllimited="true" ctrlrange="-4.5 4.5"/>
+    <motor name="act_drive_rr" joint="spin_rr" gear="1.0" ctrllimited="true" ctrlrange="-4.5 4.5"/>
+  </actuator>
+</mujoco>

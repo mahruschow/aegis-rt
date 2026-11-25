@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aegis-RT | Deterministic Edge Autonomy — Mahrus Chowdhury</title>
+  <style>
+    :root {
+      --bg: #070b14;
+      --card: rgba(15, 23, 42, 0.82);
+      --border: rgba(56, 189, 248, 0.22);
+      --accent: #38bdf8;
+      --emerald: #10b981;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background: radial-gradient(circle at top, #0f172a 0%, #050810 70%);
+      color: var(--text);
+      line-height: 1.65;
+      padding-bottom: 5rem;
+    }
+    .container { max-width: 1120px; margin: 0 auto; padding: 0 1.5rem; }
+    header {
+      padding: 3.5rem 0 2.5rem;
+      text-align: center;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    }
+    .pill {
+      display: inline-block;
+      padding: 0.3rem 0.9rem;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid var(--border);
+      color: var(--accent);
+      font-size: 0.82rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      margin-bottom: 1rem;
+    }
+    h1 { font-size: clamp(2rem, 4.5vw, 3.2rem); letter-spacing: -0.02em; margin-bottom: 0.75rem; }
+    .subtitle { max-width: 760px; margin: 0 auto 1.75rem; color: var(--muted); font-size: 1.1rem; }
+    .btn-row { display: flex; gap: 0.9rem; justify-content: center; flex-wrap: wrap; }
+    .btn {
+      padding: 0.65rem 1.35rem;
+      border-radius: 0.6rem;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: transform 0.15s ease, border-color 0.15s ease;
+    }
+    .btn-primary { background: var(--accent); color: #020617; }
+    .btn-outline { border: 1px solid var(--border); color: var(--text); background: var(--card); }
+    .btn:hover { transform: translateY(-2px); }
+
+    section { margin-top: 3.5rem; }
+    h2 { font-size: 1.65rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.6rem; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 1.6rem;
+      backdrop-filter: blur(12px);
+    }
+
+    /* Interactive Vehicle Switcher */
+    .tabs { display: flex; gap: 0.75rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+    .tab-btn {
+      padding: 0.6rem 1.2rem;
+      border-radius: 0.6rem;
+      border: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.6);
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.92rem;
+    }
+    .tab-btn.active {
+      background: rgba(16, 185, 129, 0.16);
+      border-color: var(--emerald);
+      color: #ecfdf5;
+    }
+    .vehicle-grid {
+      display: grid;
+      grid-template-columns: 1.35fr 1fr;
+      gap: 1.5rem;
+      align-items: center;
+    }
+    @media (max-width: 840px) { .vehicle-grid { grid-template-columns: 1fr; } }
+    .vehicle-gif { width: 100%; border-radius: 0.75rem; border: 1px solid rgba(255,255,255,0.1); }
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; margin-top: 1rem; }
+    .stat-box {
+      background: rgba(2, 6, 23, 0.65);
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      padding: 0.85rem;
+      border-radius: 0.65rem;
+    }
+    .stat-val { font-size: 1.35rem; font-weight: 700; color: var(--emerald); }
+    .stat-lbl { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; }
+
+    /* Interactive Latency Explorer */
+    .bar-wrap { margin: 1rem 0; }
+    .bar-label { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 0.35rem; }
+    .bar-track {
+      height: 26px;
+      background: rgba(2, 6, 23, 0.8);
+      border-radius: 6px;
+      overflow: hidden;
+      display: flex;
+      border: 1px solid rgba(148,163,184,0.15);
+    }
+    .seg-pre { background: #3b82f6; height: 100%; transition: width 0.35s ease; }
+    .seg-inf { background: #10b981; height: 100%; transition: width 0.35s ease; }
+
+    /* About Me Section */
+    .about-grid { display: grid; grid-template-columns: 1fr 1.6fr; gap: 1.75rem; }
+    @media (max-width: 840px) { .about-grid { grid-template-columns: 1fr; } }
+    .skill-tags { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+    .tag {
+      font-size: 0.8rem;
+      padding: 0.3rem 0.7rem;
+      border-radius: 6px;
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      color: #bae6fd;
+    }
+    img.full-plot { width: 100%; border-radius: 0.75rem; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <span class="pill">OPEN-SOURCE REAL-TIME AUTONOMY · C++20 / CUDA / TENSORRT</span>
+      <h1>Aegis-RT</h1>
+      <p class="subtitle">
+        A deterministic, zero-heap-allocation edge perception and closed-loop control stack driving both a
+        <strong>6-DOF Quadrotor UAV</strong> and a <strong>4-Wheel Ackermann Rover</strong> at ~1,000 Hz.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" href="https://github.com/mahruschow/aegis-rt">View on GitHub</a>
+        <a class="btn btn-outline" href="#about-me">About Mahrus Chowdhury</a>
+      </div>
+    </header>
+
+    <section>
+      <h2>Interactive Multi-Vehicle Showcase</h2>
+      <div class="card">
+        <div class="tabs">
+          <button class="tab-btn active" onclick="selectVehicle('drone', this)">6-DOF Quadrotor Drone (UAV)</button>
+          <button class="tab-btn" onclick="selectVehicle('rover', this)">4-Wheel Ackermann Rover (UGV)</button>
+        </div>
+        <div class="vehicle-grid">
+          <img id="veh-gif" class="vehicle-gif" src="media/drone_pursuit.gif" alt="Autonomous Pursuit Simulation" />
+          <div>
+            <h3 id="veh-title" style="font-size:1.3rem; margin-bottom:0.5rem;">Geometric SE(3) Aerial Pursuit</h3>
+            <p id="veh-desc" style="color:var(--muted); font-size:0.95rem;">
+              Tracks an agile 3D figure-8 target beacon weaving through cylindrical pillars using pure neural-network
+              vision, linearized RGB-D depth back-projection, a latency-compensated 6-state Kalman filter, and X-frame 4-rotor allocation.
+            </p>
+            <div class="stat-grid">
+              <div class="stat-box"><div id="st-lat" class="stat-val">0.83 ms</div><div class="stat-lbl">End-to-End p50</div></div>
+              <div class="stat-box"><div id="st-hz" class="stat-val">1,161 Hz</div><div class="stat-lbl">Sustained Rate</div></div>
+              <div class="stat-box"><div id="st-rmse" class="stat-val">0.055 m</div><div class="stat-lbl">3D Tracking RMSE</div></div>
+              <div class="stat-box"><div id="st-det" class="stat-val">100.0%</div><div class="stat-lbl">Visual Lock Rate</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Interactive Amdahl's Law Bottleneck Explorer</h2>
+      <div class="card">
+        <p style="color:var(--muted); margin-bottom:1rem;">
+          Click a hardware backend below to inspect why accelerating neural inference <strong>9.6x</strong> shifts host CPU image preprocessing from 4.3% to <strong>~30% of total frame time</strong>—motivating our custom fused CUDA kernel (<code>src/kernels/preprocess.cu</code>).
+        </p>
+        <div class="tabs">
+          <button class="tab-btn active" onclick="setBackend('cpu', this)">ORT-CPU (FP32)</button>
+          <button class="tab-btn" onclick="setBackend('ane', this)">Apple CoreML (ANE)</button>
+          <button class="tab-btn" onclick="setBackend('trt', this)">Fused CUDA + TensorRT INT8 (Target)</button>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label">
+            <span id="b-title">ORT-CPU-FP32 (Total p50: 5.79 ms / 16.67 ms 60Hz Budget)</span>
+            <span id="b-share" style="color:var(--accent);">Preprocess Share: 4.3%</span>
+          </div>
+          <div class="bar-track">
+            <div id="seg-pre" class="seg-pre" style="width: 4.0%;" title="Preprocess"></div>
+            <div id="seg-inf" class="seg-inf" style="width: 85.0%;" title="Inference"></div>
+          </div>
+        </div>
+        <img class="full-plot" src="media/aegis_benchmark_report.png" alt="Aegis-RT Telemetry Benchmark Plots" />
+      </div>
+    </section>
+
+    <section id="about-me">
+      <h2>About the Author</h2>
+      <div class="card about-grid">
+        <div>
+          <h3 style="font-size:1.45rem;">Mahrus Chowdhury</h3>
+          <p style="color:var(--accent); font-weight:600; margin-bottom:0.75rem;">
+            Computer Engineering · Real-Time Autonomy, Edge AI &amp; GPU Systems
+          </p>
+          <p style="color:var(--muted); font-size:0.93rem; margin-bottom:1rem;">
+            Building deterministic software where algorithms meet physical hardware—from lock-free C++20 runtimes and CUDA/TensorRT inference kernels to closed-loop robotics and embedded silicon.
+          </p>
+          <div class="btn-row" style="justify-content:flex-start;">
+            <a class="btn btn-primary" href="https://github.com/mahruschow">@mahruschow</a>
+            <a class="btn btn-outline" href="mailto:mahhchowdhury@gmail.com">Email Me</a>
+          </div>
+        </div>
+        <div>
+          <h4 style="margin-bottom:0.5rem;">Why I Built Aegis-RT</h4>
+          <p style="color:var(--muted); font-size:0.95rem; margin-bottom:0.9rem;">
+            Most AI demos stop at running Python scripts on recorded video. In real autonomous systems—whether aerial drones, ground rovers, or spacecraft—every millisecond of tail jitter, PCIe memory copy, and sensor-to-actuator latency directly impacts physical stability. I built <strong>Aegis-RT</strong> to bridge deep learning inference with hard-real-time Computer Engineering principles, and made the entire stack open, documented, and reproducible so anyone can experiment with it.
+          </p>
+          <div class="skill-tags">
+            <span class="tag">C++20 / Embedded Systems</span>
+            <span class="tag">CUDA &amp; TensorRT (FP16/INT8)</span>
+            <span class="tag">MuJoCo &amp; Sim-to-Real</span>
+            <span class="tag">State Estimation (Kalman)</span>
+            <span class="tag">Geometric SE(3) &amp; Ackermann Control</span>
+            <span class="tag">Lock-Free Concurrency</span>
+            <span class="tag">Hardware-Software Co-Design</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const vehicles = {
+      drone: {
+        gif: "media/drone_pursuit.gif",
+        title: "Geometric SE(3) Aerial Pursuit (6-DOF UAV)",
+        desc: "Tracks an agile 3D figure-8 target beacon weaving through cylindrical pillars using pure neural-network vision, linearized RGB-D depth back-projection, a latency-compensated 6-state Kalman filter, and X-frame 4-rotor control allocation.",
+        lat: "0.83 ms", hz: "1,161 Hz", rmse: "0.055 m", det: "100.0%"
+      },
+      rover: {
+        gif: "media/rover_pursuit.gif",
+        title: "Ackermann Pure-Pursuit & Torque Vectoring (4-Wheel UGV)",
+        desc: "Zero-shot deployment of the exact same ONNX detector onto a 4-wheel steered ground rover with exact inner/outer Ackermann steering geometry, potential-field obstacle repulsion, and cornering-modulated rear torque vectoring.",
+        lat: "1.04 ms", hz: "929 Hz", rmse: "0.057 m", det: "100.0%"
+      }
+    };
+    function selectVehicle(key, btn) {
+      document.querySelectorAll('.tabs')[0].querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const v = vehicles[key];
+      document.getElementById('veh-gif').src = v.gif;
+      document.getElementById('veh-title').textContent = v.title;
+      document.getElementById('veh-desc').textContent = v.desc;
+      document.getElementById('st-lat').textContent = v.lat;
+      document.getElementById('st-hz').textContent = v.hz;
+      document.getElementById('st-rmse').textContent = v.rmse;
+      document.getElementById('st-det').textContent = v.det;
+    }
+    const backends = {
+      cpu: { title: "ORT-CPU-FP32 (Pre: 0.25 ms | Inf: 5.53 ms | p99: 7.05 ms)", share: "Preprocess Share: 4.3%", preW: "4%", infW: "84%" },
+      ane: { title: "ORT-CoreML-ANE (Pre: 0.25 ms | Inf: 0.58 ms | p99: 1.33 ms)", share: "Preprocess Share: 29.8% (Host Bottleneck!)", preW: "4%", infW: "9.5%" },
+      trt: { title: "Fused CUDA Kernel + TensorRT INT8 (4x Less PCIe Traffic + Zero-Copy Ready)", share: "Host CPU Bottleneck Eliminated", preW: "0.8%", infW: "4.5%" }
+    };
+    function setBackend(key, btn) {
+      document.querySelectorAll('.tabs')[1].querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const b = backends[key];
+      document.getElementById('b-title').textContent = b.title;
+      document.getElementById('b-share').textContent = b.share;
+      document.getElementById('seg-pre').style.width = b.preW;
+      document.getElementById('seg-inf').style.width = b.infW;
+    }
+  </script>
+</body>
+</html>

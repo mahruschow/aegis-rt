@@ -1,0 +1,47 @@
+# ==============================================================================
+# Aegis-RT Reproducible Cloud GPU Container (CUDA 12.x + TensorRT 10.x + MuJoCo)
+# Tested target: RunPod / Lambda / Vast.ai / AWS g5 (RTX 3090, 4090, A10, L4)
+# ==============================================================================
+FROM nvcr.io/nvidia/tensorrt:24.08-py3
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV MUJOCO_GL=egl
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    ninja-build \
+    git \
+    wget \
+    curl \
+    libglfw3-dev \
+    libegl1-mesa-dev \
+    libgl1-mesa-dev \
+    libgles2-mesa-dev \
+    libosmesa6-dev \
+    xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install ONNX Runtime C++ GPU SDK (Linux x86_64)
+ARG ORT_VERSION=1.19.2
+RUN wget -q https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz \
+    && tar -xzf onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz -C /opt \
+    && ln -s /opt/onnxruntime-linux-x64-gpu-${ORT_VERSION} /opt/onnxruntime \
+    && rm onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz
+ENV ONNXRUNTIME_ROOT=/opt/onnxruntime
+ENV LD_LIBRARY_PATH=/opt/onnxruntime/lib:${LD_LIBRARY_PATH}
+
+# Install Python training, MuJoCo wheel (bundles C headers + libmujoco.so), and plotting deps
+WORKDIR /workspace/aegis-rt
+RUN python3 -m venv /workspace/aegis-rt/.venv \
+    && /workspace/aegis-rt/.venv/bin/pip install --no-cache-dir \
+       mujoco onnx numpy matplotlib torch
+
+COPY . /workspace/aegis-rt
+
+RUN cmake -S . -B build -G Ninja \
+    -DAEGIS_ENABLE_CUDA=ON \
+    -DAEGIS_ENABLE_TENSORRT=ON \
+    && cmake --build build -j$(nproc)
+
+CMD ["bash", "scripts/cloud_bench.sh"]

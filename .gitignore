@@ -1,0 +1,23 @@
+# Build directories
+build/
+build-*/
+cmake-build-*/
+
+# Python virtual environment & caches
+.venv/
+__pycache__/
+*.py[cod]
+
+# Serialized model weights & TensorRT plans
+assets/models/*.onnx
+assets/models/*.engine
+assets/calib_frames/
+
+# Profiling & benchmark artifacts
+*.nsys-rep
+*.ncu-rep
+*.sqlite
+results/*.csv
+
+# macOS
+.DS_Store

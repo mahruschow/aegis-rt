@@ -1,0 +1,77 @@
+<mujoco model="aegis_pursuit_arena">
+  <compiler angle="degree" coordinate="local" inertiafromgeom="false"/>
+  <option timestep="0.005" gravity="0 0 -9.81" integrator="RK4" density="1.2" viscosity="0.000018"/>
+
+  <visual>
+    <global offwidth="640" offheight="480"/>
+    <headlight ambient="0.45 0.45 0.48" diffuse="0.75 0.75 0.75" specular="0.2 0.2 0.2"/>
+    <rgba haze="0.12 0.16 0.22 1"/>
+  </visual>
+
+  <asset>
+    <texture name="grid_tex" type="2d" builtin="checker" width="512" height="512"
+             rgb1="0.14 0.17 0.21" rgb2="0.20 0.24 0.29"/>
+    <material name="arena_floor" texture="grid_tex" texrepeat="12 12" reflectance="0.08"/>
+    <material name="pillar_mat" rgba="0.28 0.36 0.46 1" shininess="0.3"/>
+    <material name="drone_frame" rgba="0.15 0.17 0.20 1" shininess="0.6"/>
+    <material name="rotor_mat" rgba="0.10 0.75 0.95 0.85"/>
+    <material name="target_mat" rgba="1.0 0.14 0.04 1" emission="0.45" shininess="0.8"/>
+  </asset>
+
+  <worldbody>
+    <light name="top_sun" pos="0 0 12" dir="0 0 -1" directional="true" diffuse="0.85 0.85 0.85"/>
+    <geom name="floor" type="plane" size="15 15 0.1" material="arena_floor"/>
+
+    <!-- Cylindrical Arena Obstacles -->
+    <geom name="obs_0" type="cylinder" pos="2.2  1.4 1.25" size="0.32 1.25" material="pillar_mat"/>
+    <geom name="obs_1" type="cylinder" pos="2.2 -1.4 1.25" size="0.32 1.25" material="pillar_mat"/>
+    <geom name="obs_2" type="cylinder" pos="-2.2 1.4 1.25" size="0.32 1.25" material="pillar_mat"/>
+    <geom name="obs_3" type="cylinder" pos="-2.2 -1.4 1.25" size="0.32 1.25" material="pillar_mat"/>
+
+    <!-- Evasive Target Beacon (Mocap-driven figure-8 trajectory) -->
+    <body name="target_beacon" mocap="true" pos="2.6 0.0 1.15">
+      <geom name="target_sphere" type="sphere" size="0.28" material="target_mat" contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- 6-DOF Autonomous Pursuit Quadrotor (Mass = 1.05 kg, X-frame L = 0.15 m) -->
+    <body name="quadrotor" pos="-0.2 0.0 1.55">
+      <freejoint name="drone_root"/>
+      <inertial pos="0 0 0" mass="1.05" diaginertia="0.0095 0.0095 0.0175"/>
+
+      <!-- Central Avionics Chassis -->
+      <geom name="chassis" type="box" size="0.09 0.07 0.03" material="drone_frame"/>
+      <geom name="arm_fr_rl" type="capsule" fromto="-0.15 0.15 0 0.15 -0.15 0" size="0.012" material="drone_frame"/>
+      <geom name="arm_fl_rr" type="capsule" fromto="-0.15 -0.15 0 0.15 0.15 0" size="0.012" material="drone_frame"/>
+
+      <!-- Visual Rotors & Thruster Sites -->
+      <!-- m0: Front-Right (+0.15, -0.15), CCW (+yaw reaction) -->
+      <geom name="prop_fr" type="cylinder" pos="0.15 -0.15 0.025" size="0.075 0.005" material="rotor_mat"/>
+      <site name="thrust_fr" pos="0.15 -0.15 0" size="0.01"/>
+
+      <!-- m1: Front-Left (+0.15, +0.15), CW (-yaw reaction) -->
+      <geom name="prop_fl" type="cylinder" pos="0.15 0.15 0.025" size="0.075 0.005" material="rotor_mat"/>
+      <site name="thrust_fl" pos="0.15 0.15 0" size="0.01"/>
+
+      <!-- m2: Rear-Left (-0.15, +0.15), CCW (+yaw reaction) -->
+      <geom name="prop_rl" type="cylinder" pos="-0.15 0.15 0.025" size="0.075 0.005" material="rotor_mat"/>
+      <site name="thrust_rl" pos="-0.15 0.15 0" size="0.01"/>
+
+      <!-- m3: Rear-Right (-0.15, -0.15), CW (-yaw reaction) -->
+      <geom name="prop_rr" type="cylinder" pos="-0.15 -0.15 0.025" size="0.075 0.005" material="rotor_mat"/>
+      <site name="thrust_rr" pos="-0.15 -0.15 0" size="0.01"/>
+
+      <!-- Forward-Facing Wide-FOV RGB-D Tracking Camera (+X forward, 68 deg VFOV for aggressive pitch maneuvers) -->
+      <!-- MuJoCo camera convention: -Z is optical forward axis, +X is image right, +Y is image up.
+           xyaxes="0 -1 0 0 0 1" aligns optical axis (-Z_cam) with +X_body and image up (+Y_cam) with +Z_body. -->
+      <camera name="fpv_rgb" pos="0.10 0.0 0.02" fovy="68"
+              xyaxes="0 -1 0 0 0 1"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <general name="motor_fr" site="thrust_fr" gear="0 0 1 0 0  0.016" ctrllimited="true" ctrlrange="0 8.0"/>
+    <general name="motor_fl" site="thrust_fl" gear="0 0 1 0 0 -0.016" ctrllimited="true" ctrlrange="0 8.0"/>
+    <general name="motor_rl" site="thrust_rl" gear="0 0 1 0 0  0.016" ctrllimited="true" ctrlrange="0 8.0"/>
+    <general name="motor_rr" site="thrust_rr" gear="0 0 1 0 0 -0.016" ctrllimited="true" ctrlrange="0 8.0"/>
+  </actuator>
+</mujoco>
