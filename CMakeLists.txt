@@ -178,6 +178,10 @@ add_executable(test_kalman_control tests/test_kalman_control.cpp)
 target_link_libraries(test_kalman_control PRIVATE aegis_core)
 add_test(NAME KalmanAndSe3ControllerTest COMMAND test_kalman_control)
 
+add_executable(test_letterbox_decode tests/test_letterbox_decode.cpp)
+target_link_libraries(test_letterbox_decode PRIVATE aegis_core)
+add_test(NAME LetterboxAndDecodeParityTest COMMAND test_letterbox_decode)
+
 if(AEGIS_ENABLE_CUDA)
     add_executable(test_cuda_preprocess tests/test_cuda_preprocess.cu src/kernels/preprocess.cu)
     target_include_directories(test_cuda_preprocess PRIVATE include)
