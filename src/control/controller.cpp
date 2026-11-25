@@ -70,8 +70,19 @@ core::RotorCommand QuadrotorController::compute_command(
         desired_vel = {target.vel_world.x * 0.90, target.vel_world.y * 0.90, target.vel_world.z * 0.80};
     }
 
-    // 2. Artificial Potential Field repulsive acceleration from cylindrical obstacles
+    // 2. Artificial Potential Field repulsive + tangential vortex acceleration from cylindrical obstacles
     core::Vec3 accel_repulsive{0.0, 0.0, 0.0};
+    core::Vec3 goal_dir_xy{0.0, 0.0, 0.0};
+    bool has_goal_dir = false;
+    if (target.valid) {
+        const core::Vec3 to_target{target.pos_world.x - drone.pos.x, target.pos_world.y - drone.pos.y, 0.0};
+        const double d_goal = to_target.norm_xy();
+        if (d_goal > 1e-3) {
+            goal_dir_xy = to_target / d_goal;
+            has_goal_dir = true;
+        }
+    }
+
     for (std::size_t i = 0; i < num_obstacles; ++i) {
         const double dx = drone.pos.x - obstacles[i].x;
         const double dy = drone.pos.y - obstacles[i].y;
@@ -84,8 +95,23 @@ core::RotorCommand QuadrotorController::compute_command(
             const double inv_d0 = 1.0 / cfg_.obstacle_influence_m;
             const double mag = std::min(
                 6.0, cfg_.obstacle_gain * (inv_d - inv_d0) * (inv_d * inv_d));
-            accel_repulsive.x += mag * (dx / center_dist);
-            accel_repulsive.y += mag * (dy / center_dist);
+            const double rx_hat = dx / center_dist;
+            const double ry_hat = dy / center_dist;
+            accel_repulsive.x += mag * rx_hat;
+            accel_repulsive.y += mag * ry_hat;
+
+            // Add tangential vortex curl when obstacle lies ahead along target bearing,
+            // breaking collinear saddle points / local minima.
+            if (has_goal_dir && cfg_.obstacle_vortex_ratio > 0.0) {
+                const double approach_dot = rx_hat * goal_dir_xy.x + ry_hat * goal_dir_xy.y;
+                if (approach_dot < 0.0) {
+                    const double ccw_dot = (-ry_hat) * goal_dir_xy.x + rx_hat * goal_dir_xy.y;
+                    const double sign = (ccw_dot >= 0.0) ? 1.0 : -1.0;
+                    const double vortex_mag = cfg_.obstacle_vortex_ratio * mag * (-approach_dot);
+                    accel_repulsive.x += vortex_mag * sign * (-ry_hat);
+                    accel_repulsive.y += vortex_mag * sign * rx_hat;
+                }
+            }
         }
     }
 
@@ -160,18 +186,58 @@ core::RotorCommand QuadrotorController::compute_command(
     //   tau_x = L * (-f0 + f1 + f2 - f3)   (roll moment around +X)
     //   tau_y = L * (-f0 - f1 + f2 + f3)   (pitch moment around +Y)
     //   tau_z = c * ( f0 - f1 + f2 - f3)   (yaw reaction torque around +Z)
-    const double t_part = 0.25 * collective_thrust;
-    const double rx = 0.25 * tau.x / cfg_.arm_length_m;
-    const double ry = 0.25 * tau.y / cfg_.arm_length_m;
-    const double rz = 0.25 * tau.z / cfg_.yaw_torque_coeff;
+    double t_part = 0.25 * collective_thrust;
+    double rx = 0.25 * tau.x / cfg_.arm_length_m;
+    double ry = 0.25 * tau.y / cfg_.arm_length_m;
+    double rz = 0.25 * tau.z / cfg_.yaw_torque_coeff;
+
+    // Priority-preserving rotor desaturation:
+    // 1. Scale roll/pitch differential only if full swing exceeds actuator span.
+    // 2. Shift collective thrust within headroom to preserve roll/pitch attitude authority.
+    // 3. Clip yaw allocation within remaining headroom before final bounds clamp.
+    const double f_min = cfg_.min_motor_thrust_n;
+    const double f_max = cfg_.max_motor_thrust_n;
+    const double rp_swing = std::abs(rx) + std::abs(ry);
+    const double half_span = 0.5 * (f_max - f_min);
+    if (rp_swing > half_span && rp_swing > 1e-9) {
+        const double scale = half_span / rp_swing;
+        rx *= scale;
+        ry *= scale;
+    }
+
+    std::array<double, 4> f_rp{
+        t_part - rx - ry,
+        t_part + rx - ry,
+        t_part + rx + ry,
+        t_part - rx + ry};
+    const auto [min_it, max_it] = std::minmax_element(f_rp.begin(), f_rp.end());
+    double t_shift = 0.0;
+    if (*max_it > f_max) {
+        t_shift = f_max - *max_it;
+    } else if (*min_it < f_min) {
+        t_shift = f_min - *min_it;
+    }
+    if (t_shift != 0.0) {
+        for (double& f : f_rp) {
+            f = std::clamp(f + t_shift, f_min, f_max);
+        }
+    }
+
+    constexpr std::array<double, 4> kYawSign{1.0, -1.0, 1.0, -1.0};
+    double rz_cap = std::abs(rz);
+    for (std::size_t i = 0; i < 4; ++i) {
+        const double signed_dir = kYawSign[i] * rz;
+        const double headroom = (signed_dir >= 0.0) ? (f_max - f_rp[i]) : (f_rp[i] - f_min);
+        rz_cap = std::min(rz_cap, std::max(0.0, headroom));
+    }
+    const double rz_eff = std::copysign(rz_cap, rz);
 
     core::RotorCommand cmd{};
     cmd.collective_thrust_n = collective_thrust;
     cmd.body_moment_nm = tau;
-    cmd.motor_thrusts_n[0] = std::clamp(t_part - rx - ry + rz, cfg_.min_motor_thrust_n, cfg_.max_motor_thrust_n);
-    cmd.motor_thrusts_n[1] = std::clamp(t_part + rx - ry - rz, cfg_.min_motor_thrust_n, cfg_.max_motor_thrust_n);
-    cmd.motor_thrusts_n[2] = std::clamp(t_part + rx + ry + rz, cfg_.min_motor_thrust_n, cfg_.max_motor_thrust_n);
-    cmd.motor_thrusts_n[3] = std::clamp(t_part - rx + ry - rz, cfg_.min_motor_thrust_n, cfg_.max_motor_thrust_n);
+    for (std::size_t i = 0; i < 4; ++i) {
+        cmd.motor_thrusts_n[i] = std::clamp(f_rp[i] + kYawSign[i] * rz_eff, f_min, f_max);
+    }
     return cmd;
 }
 

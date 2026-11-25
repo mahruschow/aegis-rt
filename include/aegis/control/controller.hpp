@@ -43,9 +43,10 @@ public:
         double max_tilt_rad{0.52};       // ~30 deg max roll/pitch angle
         double max_vel_xy{4.5};          // m/s saturation
 
-        // Obstacle repulsive potential field
+        // Obstacle repulsive potential field + tangential vortex local-minimum escape
         double obstacle_influence_m{1.35};
         double obstacle_gain{3.2};
+        double obstacle_vortex_ratio{0.55};
 
         // Inner-loop SO(3) attitude & angular rate gains
         double kr_roll_pitch{4.2};

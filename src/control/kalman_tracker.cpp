@@ -45,6 +45,10 @@ void KalmanTracker3D::reset(const core::Vec3& initial_pos, uint64_t timestamp_ns
     }
     last_timestamp_ns_ = timestamp_ns;
     last_confidence_ = 1.0;
+    last_nis_ = 0.0;
+    adaptive_q_scale_ = 1.0;
+    accepted_updates_ = 0;
+    rejected_outliers_ = 0;
     initialized_ = true;
 }
 
@@ -74,9 +78,10 @@ void KalmanTracker3D::predict(double dt_s) noexcept {
         }
     }
 
+    const double q_vel_eff = cfg_.process_noise_vel * adaptive_q_scale_;
     for (int i = 0; i < 3; ++i) {
         FPFt[i * 6 + i] += cfg_.process_noise_pos * dt_s;
-        FPFt[(i + 3) * 6 + (i + 3)] += cfg_.process_noise_vel * dt_s;
+        FPFt[(i + 3) * 6 + (i + 3)] += q_vel_eff * dt_s;
     }
     P_ = FPFt;
 }
@@ -94,9 +99,9 @@ bool KalmanTracker3D::update_with_latency_compensation(
         return true;
     }
 
-    // Innovation residual y = z - H*x (where H = [I_3x3, 0_3x3])
-    // Note: Account for perception pipeline delay (current_ts - capture_ts) by comparing
-    // against back-projected state at capture time: p_at_capture ~= p_now - v_now * delay
+    // Account for perception pipeline delay (current_ts - capture_ts) using the
+    // latency-compensated linear measurement model z_k = p_now - delay_s * v_now,
+    // whose exact Jacobian is H = [I_3x3, -delay_s * I_3x3].
     const double delay_s = (current_timestamp_ns > capture_timestamp_ns)
                                ? std::clamp(static_cast<double>(current_timestamp_ns - capture_timestamp_ns) * 1e-9, 0.0, 0.10)
                                : 0.0;
@@ -108,8 +113,8 @@ bool KalmanTracker3D::update_with_latency_compensation(
     };
 
     const core::Vec3 y = measured_pos_world - expected_at_capture;
-    if (y.norm() > cfg_.innovation_gate_m) {
-        // Outlier gate triggered — reject spurious detection
+    if (cfg_.innovation_gate_m > 0.0 && y.norm() > cfg_.innovation_gate_m) {
+        ++rejected_outliers_;
         return false;
     }
 
@@ -117,11 +122,19 @@ bool KalmanTracker3D::update_with_latency_compensation(
     const double conf_clamped = std::clamp(confidence, 0.2, 1.0);
     const double r_var = cfg_.measurement_noise_pos / (conf_clamped * conf_clamped);
 
-    // S = H * P * H^T + R (top-left 3x3 of P + r_var * I)
+    // P_HT = P * H^T (6x3): column c is P[:, c] - delay_s * P[:, c + 3]
+    std::array<double, 18> P_HT{};
+    for (int r = 0; r < 6; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            P_HT[r * 3 + c] = P_[r * 6 + c] - delay_s * P_[r * 6 + (c + 3)];
+        }
+    }
+
+    // Innovation covariance S = H * P * H^T + R (3x3)
     std::array<double, 9> S{};
     for (int r = 0; r < 3; ++r) {
         for (int c = 0; c < 3; ++c) {
-            S[r * 3 + c] = P_[r * 6 + c] + ((r == c) ? r_var : 0.0);
+            S[r * 3 + c] = P_HT[r * 3 + c] - delay_s * P_HT[(r + 3) * 3 + c] + ((r == c) ? r_var : 0.0);
         }
     }
 
@@ -130,49 +143,95 @@ bool KalmanTracker3D::update_with_latency_compensation(
         return false;
     }
 
+    // Normalized Innovation Squared (squared Mahalanobis distance): d^2 = y^T * S^-1 * y
+    const std::array<double, 3> y_arr{y.x, y.y, y.z};
+    double nis = 0.0;
+    for (int r = 0; r < 3; ++r) {
+        double s_inv_y = 0.0;
+        for (int c = 0; c < 3; ++c) {
+            s_inv_y += S_inv[r * 3 + c] * y_arr[c];
+        }
+        nis += y_arr[r] * s_inv_y;
+    }
+    last_nis_ = nis;
+
+    // Statistical Mahalanobis outlier gate (3-DOF chi-squared)
+    if (cfg_.mahalanobis_gate_chi2 > 0.0 && nis > cfg_.mahalanobis_gate_chi2) {
+        ++rejected_outliers_;
+        return false;
+    }
+
+    // NIS-driven adaptive process noise scaling for maneuvering targets
+    if (cfg_.maneuver_nis_threshold > 0.0 && nis > cfg_.maneuver_nis_threshold) {
+        const double ratio = nis / cfg_.maneuver_nis_threshold;
+        const double target_scale = std::clamp(ratio, 1.0, cfg_.adaptive_q_max_scale);
+        adaptive_q_scale_ = std::max(adaptive_q_scale_, target_scale);
+    } else {
+        adaptive_q_scale_ = 1.0 + cfg_.adaptive_q_decay * (adaptive_q_scale_ - 1.0);
+    }
+
     // Kalman gain K = P * H^T * S^-1 (6x3 matrix)
     std::array<double, 18> K{};
     for (int r = 0; r < 6; ++r) {
         for (int c = 0; c < 3; ++c) {
             double sum = 0.0;
             for (int k = 0; k < 3; ++k) {
-                sum += P_[r * 6 + k] * S_inv[k * 3 + c];
+                sum += P_HT[r * 3 + k] * S_inv[k * 3 + c];
             }
             K[r * 3 + c] = sum;
         }
     }
 
     // State update: x = x + K * y
-    const std::array<double, 3> y_arr{y.x, y.y, y.z};
     for (int r = 0; r < 6; ++r) {
         x_[r] += K[r * 3 + 0] * y_arr[0] + K[r * 3 + 1] * y_arr[1] + K[r * 3 + 2] * y_arr[2];
     }
 
-    // Covariance update: P = (I - K * H) * P
-    Mat6 I_KH{};
+    // Joseph-form covariance update: P = (I - K * H) * P * (I - K * H)^T + K * R * K^T
+    // Preserves symmetry and positive-definiteness across long flight horizons.
+    Mat6 A{};  // I - K * H, where H = [I_3, -delay_s * I_3]
     for (int r = 0; r < 6; ++r) {
         for (int c = 0; c < 6; ++c) {
             double val = (r == c) ? 1.0 : 0.0;
             if (c < 3) {
                 val -= K[r * 3 + c];
+            } else {
+                val += delay_s * K[r * 3 + (c - 3)];
             }
-            I_KH[r * 6 + c] = val;
+            A[r * 6 + c] = val;
+        }
+    }
+
+    Mat6 AP{};
+    for (int r = 0; r < 6; ++r) {
+        for (int c = 0; c < 6; ++c) {
+            double sum = 0.0;
+            for (int k = 0; k < 6; ++k) {
+                sum += A[r * 6 + k] * P_[k * 6 + c];
+            }
+            AP[r * 6 + c] = sum;
         }
     }
 
     Mat6 P_new{};
     for (int r = 0; r < 6; ++r) {
-        for (int c = 0; c < 6; ++c) {
+        for (int c = r; c < 6; ++c) {
             double sum = 0.0;
             for (int k = 0; k < 6; ++k) {
-                sum += I_KH[r * 6 + k] * P_[k * 6 + c];
+                sum += AP[r * 6 + k] * A[c * 6 + k];
             }
-            P_new[r * 6 + c] = sum;
+            const double krk = r_var * (K[r * 3 + 0] * K[c * 3 + 0] +
+                                        K[r * 3 + 1] * K[c * 3 + 1] +
+                                        K[r * 3 + 2] * K[c * 3 + 2]);
+            const double sym_val = sum + krk;
+            P_new[r * 6 + c] = sym_val;
+            P_new[c * 6 + r] = sym_val;
         }
     }
     P_ = P_new;
     last_timestamp_ns_ = effective_ts;
     last_confidence_ = confidence;
+    ++accepted_updates_;
     return true;
 }
 
@@ -184,6 +243,14 @@ core::TargetEstimate3D KalmanTracker3D::estimate() const noexcept {
     est.valid = initialized_;
     est.timestamp_ns = last_timestamp_ns_;
     return est;
+}
+
+double KalmanTracker3D::position_covariance_trace() const noexcept {
+    return P_[0] + P_[7] + P_[14];
+}
+
+double KalmanTracker3D::velocity_covariance_trace() const noexcept {
+    return P_[21] + P_[28] + P_[35];
 }
 
 }  // namespace aegis::control
