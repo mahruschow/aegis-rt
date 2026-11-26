@@ -1,9 +1,12 @@
 #include "aegis/backends/i_backend.hpp"
 #include "aegis/core/frame_types.hpp"
+#include "aegis/core/telemetry.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <random>
 #include <vector>
 
 namespace {
@@ -83,7 +86,65 @@ int main() {
     assert(std::abs(rotated.x) < 1e-9);
     assert(std::abs(rotated.y - 1.0) < 1e-9);
 
-    std::cout << "[PASS] test_letterbox_decode: NCHW pad/norm verified, bbox round-trip err="
-              << std::hypot(det.cx_px - kTrueCx, det.cy_px - kTrueCy) << " px.\n";
+    // 5. Verify CpuPreprocessPlan matches golden cpu_preprocess_letterbox_nchw (<1e-5) across aspect ratios
+    std::mt19937 rng(1337);
+    std::uniform_int_distribution<int> pix_dist(0, 255);
+    struct Case { int sw, sh, dw, dh; };
+    const Case cases[] = {
+        {640, 480, 320, 320},   // Landscape 4:3 -> square letterbox
+        {480, 640, 320, 320},   // Portrait 3:4 -> square pillarbox
+        {1280, 720, 416, 416},  // Non-integer 16:9 downsample
+        {320, 320, 320, 320},   // 1:1 identity geometry
+    };
+
+    float worst_diff = 0.0f;
+    for (const auto& c : cases) {
+        std::vector<uint8_t> img(static_cast<std::size_t>(c.sw) * c.sh * 3);
+        for (auto& b : img) {
+            b = static_cast<uint8_t>(pix_dist(rng));
+        }
+        const auto m = backends::compute_letterbox_meta(c.sw, c.sh, c.dw, c.dh);
+        const std::size_t out_floats = static_cast<std::size_t>(3) * c.dw * c.dh;
+        std::vector<float> ref_buf(out_floats, -1.0f);
+        std::vector<float> plan_buf(out_floats, -2.0f);
+
+        backends::cpu_preprocess_letterbox_nchw(img.data(), m, ref_buf.data());
+        backends::CpuPreprocessPlan plan(c.sw, c.sh, c.dw, c.dh);
+        plan.execute(img.data(), plan_buf.data());
+
+        for (std::size_t i = 0; i < out_floats; ++i) {
+            const float d = std::abs(ref_buf[i] - plan_buf[i]);
+            worst_diff = std::max(worst_diff, d);
+            assert(d < 1e-5f);
+        }
+    }
+
+    // 6. Microbenchmark CpuPreprocessPlan vs scalar reference on 640x480 -> 320x320
+    {
+        std::vector<uint8_t> bench_rgb(640 * 480 * 3, 127);
+        std::vector<float> bench_out(3 * 320 * 320, 0.0f);
+        const auto bench_meta = backends::compute_letterbox_meta(640, 480, 320, 320);
+        backends::CpuPreprocessPlan bench_plan(640, 480, 320, 320);
+
+        constexpr int kIters = 100;
+        const uint64_t t_ref0 = core::now_ns();
+        for (int i = 0; i < kIters; ++i) {
+            backends::cpu_preprocess_letterbox_nchw(bench_rgb.data(), bench_meta, bench_out.data());
+        }
+        const uint64_t t_ref1 = core::now_ns();
+
+        const uint64_t t_lut0 = core::now_ns();
+        for (int i = 0; i < kIters; ++i) {
+            bench_plan.execute(bench_rgb.data(), bench_out.data());
+        }
+        const uint64_t t_lut1 = core::now_ns();
+
+        const double ref_us = static_cast<double>(t_ref1 - t_ref0) / (1000.0 * kIters);
+        const double lut_us = static_cast<double>(t_lut1 - t_lut0) / (1000.0 * kIters);
+        std::cout << "[PASS] test_letterbox_decode: NCHW pad/norm verified, bbox err="
+                  << std::hypot(det.cx_px - kTrueCx, det.cy_px - kTrueCy)
+                  << " px, LUT max_diff=" << worst_diff
+                  << ", ref=" << ref_us << " us vs LUT=" << lut_us << " us.\n";
+    }
     return 0;
 }

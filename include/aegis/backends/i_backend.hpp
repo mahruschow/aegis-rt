@@ -39,6 +39,181 @@ struct LetterboxMeta {
 }
 
 /**
+ * @brief Precomputed separable bilinear + letterbox plan for zero-allocation CPU preprocessing.
+ *
+ * Hoists all floating-point coordinate mapping, clamping, and floor operations out of the
+ * per-pixel loop into 1D horizontal/vertical lookup tables, folds `1/255` scaling into vertical
+ * weights, and uses `std::fill_n` for SIMD-vectorizable letterbox border fills.
+ */
+class CpuPreprocessPlan {
+public:
+    CpuPreprocessPlan() = default;
+
+    CpuPreprocessPlan(int src_w, int src_h, int dst_w, int dst_h) {
+        configure(src_w, src_h, dst_w, dst_h);
+    }
+
+    void configure(int src_w, int src_h, int dst_w, int dst_h) {
+        if (src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0) {
+            return;
+        }
+        if (configured_ && meta_.src_w == src_w && meta_.src_h == src_h &&
+            meta_.dst_w == dst_w && meta_.dst_h == dst_h) {
+            return;
+        }
+
+        meta_ = compute_letterbox_meta(src_w, src_h, dst_w, dst_h);
+        dx_begin_ = std::max(0, meta_.pad_x);
+        dx_end_   = std::min(meta_.dst_w, meta_.pad_x + meta_.resized_w);
+        dy_begin_ = std::max(0, meta_.pad_y);
+        dy_end_   = std::min(meta_.dst_h, meta_.pad_y + meta_.resized_h);
+
+        constexpr float kInv255 = 1.0f / 255.0f;
+        const std::size_t row_stride = static_cast<std::size_t>(src_w) * 3;
+
+        x_lut_.resize(static_cast<std::size_t>(meta_.resized_w));
+        for (int inner_x = 0; inner_x < meta_.resized_w; ++inner_x) {
+            const float src_xf = std::clamp(
+                (static_cast<float>(inner_x) + 0.5f) / meta_.scale - 0.5f,
+                0.0f, static_cast<float>(src_w - 1));
+            const int x0 = static_cast<int>(std::floor(src_xf));
+            const int x1 = std::min(x0 + 1, src_w - 1);
+            const float wx1 = src_xf - static_cast<float>(x0);
+            const float wx0 = 1.0f - wx1;
+            x_lut_[static_cast<std::size_t>(inner_x)] = HorizontalSample{
+                static_cast<std::size_t>(x0) * 3,
+                static_cast<std::size_t>(x1) * 3,
+                wx0,
+                wx1
+            };
+        }
+
+        y_lut_.resize(static_cast<std::size_t>(meta_.resized_h));
+        for (int inner_y = 0; inner_y < meta_.resized_h; ++inner_y) {
+            const float src_yf = std::clamp(
+                (static_cast<float>(inner_y) + 0.5f) / meta_.scale - 0.5f,
+                0.0f, static_cast<float>(src_h - 1));
+            const int y0 = static_cast<int>(std::floor(src_yf));
+            const int y1 = std::min(y0 + 1, src_h - 1);
+            const float wy1 = src_yf - static_cast<float>(y0);
+            const float wy0 = 1.0f - wy1;
+            y_lut_[static_cast<std::size_t>(inner_y)] = VerticalSample{
+                static_cast<std::size_t>(y0) * row_stride,
+                static_cast<std::size_t>(y1) * row_stride,
+                wy0 * kInv255,
+                wy1 * kInv255
+            };
+        }
+
+        configured_ = true;
+    }
+
+    [[nodiscard]] const LetterboxMeta& meta() const noexcept { return meta_; }
+    [[nodiscard]] bool is_configured() const noexcept { return configured_; }
+
+    void execute(const uint8_t* src_rgb_hwc, float* dst_nchw) const noexcept {
+        if (!configured_) {
+            return;
+        }
+        constexpr float kPadVal = 114.0f / 255.0f;
+        const int dst_w = meta_.dst_w;
+        const int dst_h = meta_.dst_h;
+        const std::size_t plane_area = static_cast<std::size_t>(dst_w) * dst_h;
+
+        float* ch_r = dst_nchw;
+        float* ch_g = dst_nchw + plane_area;
+        float* ch_b = dst_nchw + 2 * plane_area;
+
+        const std::size_t top_pixels = static_cast<std::size_t>(dy_begin_) * dst_w;
+        if (top_pixels > 0) {
+            std::fill_n(ch_r, top_pixels, kPadVal);
+            std::fill_n(ch_g, top_pixels, kPadVal);
+            std::fill_n(ch_b, top_pixels, kPadVal);
+        }
+
+        const std::size_t bot_offset = static_cast<std::size_t>(dy_end_) * dst_w;
+        const std::size_t bot_pixels = static_cast<std::size_t>(dst_h - dy_end_) * dst_w;
+        if (bot_pixels > 0) {
+            std::fill_n(ch_r + bot_offset, bot_pixels, kPadVal);
+            std::fill_n(ch_g + bot_offset, bot_pixels, kPadVal);
+            std::fill_n(ch_b + bot_offset, bot_pixels, kPadVal);
+        }
+
+        const int left_pad = dx_begin_;
+        const int right_pad = dst_w - dx_end_;
+        const int active_w = dx_end_ - dx_begin_;
+        const HorizontalSample* xs_ptr = x_lut_.data() + (dx_begin_ - meta_.pad_x);
+
+        for (int dy = dy_begin_; dy < dy_end_; ++dy) {
+            const std::size_t row_off = static_cast<std::size_t>(dy) * dst_w;
+            if (left_pad > 0) {
+                std::fill_n(ch_r + row_off, left_pad, kPadVal);
+                std::fill_n(ch_g + row_off, left_pad, kPadVal);
+                std::fill_n(ch_b + row_off, left_pad, kPadVal);
+            }
+            if (right_pad > 0) {
+                std::fill_n(ch_r + row_off + dx_end_, right_pad, kPadVal);
+                std::fill_n(ch_g + row_off + dx_end_, right_pad, kPadVal);
+                std::fill_n(ch_b + row_off + dx_end_, right_pad, kPadVal);
+            }
+
+            const VerticalSample ys = y_lut_[static_cast<std::size_t>(dy - meta_.pad_y)];
+            const uint8_t* row0 = src_rgb_hwc + ys.row0_off;
+            const uint8_t* row1 = src_rgb_hwc + ys.row1_off;
+            const float wy0 = ys.wy0_norm;
+            const float wy1 = ys.wy1_norm;
+
+            float* dst_r = ch_r + row_off + dx_begin_;
+            float* dst_g = ch_g + row_off + dx_begin_;
+            float* dst_b = ch_b + row_off + dx_begin_;
+
+            for (int i = 0; i < active_w; ++i) {
+                const HorizontalSample xs = xs_ptr[i];
+                const uint8_t* p00 = row0 + xs.off0;
+                const uint8_t* p01 = row0 + xs.off1;
+                const uint8_t* p10 = row1 + xs.off0;
+                const uint8_t* p11 = row1 + xs.off1;
+
+                const float h0_r = xs.wx0 * static_cast<float>(p00[0]) + xs.wx1 * static_cast<float>(p01[0]);
+                const float h1_r = xs.wx0 * static_cast<float>(p10[0]) + xs.wx1 * static_cast<float>(p11[0]);
+                const float h0_g = xs.wx0 * static_cast<float>(p00[1]) + xs.wx1 * static_cast<float>(p01[1]);
+                const float h1_g = xs.wx0 * static_cast<float>(p10[1]) + xs.wx1 * static_cast<float>(p11[1]);
+                const float h0_b = xs.wx0 * static_cast<float>(p00[2]) + xs.wx1 * static_cast<float>(p01[2]);
+                const float h1_b = xs.wx0 * static_cast<float>(p10[2]) + xs.wx1 * static_cast<float>(p11[2]);
+
+                dst_r[i] = wy0 * h0_r + wy1 * h1_r;
+                dst_g[i] = wy0 * h0_g + wy1 * h1_g;
+                dst_b[i] = wy0 * h0_b + wy1 * h1_b;
+            }
+        }
+    }
+
+private:
+    struct HorizontalSample {
+        std::size_t off0;
+        std::size_t off1;
+        float wx0;
+        float wx1;
+    };
+
+    struct VerticalSample {
+        std::size_t row0_off;
+        std::size_t row1_off;
+        float wy0_norm;
+        float wy1_norm;
+    };
+
+    LetterboxMeta meta_{};
+    int dx_begin_{0};
+    int dx_end_{0};
+    int dy_begin_{0};
+    int dy_end_{0};
+    bool configured_{false};
+    std::vector<HorizontalSample> x_lut_{};
+    std::vector<VerticalSample> y_lut_{};
+};
+
+/**
  * @brief Golden CPU reference implementation of fused letterbox + bilinear resize +
  *        [0, 1] normalization + HWC -> NCHW transpose.
  *

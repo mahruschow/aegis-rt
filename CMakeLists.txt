@@ -182,6 +182,14 @@ add_executable(test_letterbox_decode tests/test_letterbox_decode.cpp)
 target_link_libraries(test_letterbox_decode PRIVATE aegis_core)
 add_test(NAME LetterboxAndDecodeParityTest COMMAND test_letterbox_decode)
 
+add_executable(test_ort_backend tests/test_ort_backend.cpp src/backends/ort_backend.cpp)
+target_include_directories(test_ort_backend PRIVATE include ${ONNXRUNTIME_INCLUDE_DIR})
+target_link_libraries(test_ort_backend PRIVATE aegis_core ${ONNXRUNTIME_LIBRARY})
+target_compile_definitions(test_ort_backend PRIVATE
+    AEGIS_DEFAULT_ONNX_PATH="${CMAKE_SOURCE_DIR}/assets/models/aegis_detector.onnx"
+)
+add_test(NAME OrtZeroAllocBackendTest COMMAND test_ort_backend)
+
 if(AEGIS_ENABLE_CUDA)
     add_executable(test_cuda_preprocess tests/test_cuda_preprocess.cu src/kernels/preprocess.cu)
     target_include_directories(test_cuda_preprocess PRIVATE include)

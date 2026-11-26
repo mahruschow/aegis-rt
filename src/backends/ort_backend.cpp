@@ -17,7 +17,10 @@ OrtBackend::OrtBackend(const std::string& onnx_path,
       mem_info_(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)) {
 
     session_opts_.SetIntraOpNumThreads(intra_op_threads);
+    session_opts_.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
     session_opts_.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+    session_opts_.EnableMemPattern();
+    session_opts_.EnableCpuMemArena();
 
     backend_name_ = "ORT-CPU-FP32";
     if (provider == ExecutionProvider::kCoreML) {
@@ -58,7 +61,11 @@ OrtBackend::OrtBackend(const std::string& onnx_path,
 
     // Query output grid shape [1, 5, GridH, GridW]
     auto out_shape = session_->GetOutputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
+    int out_channels = 5;
     if (out_shape.size() == 4 && out_shape[2] > 0 && out_shape[3] > 0) {
+        if (out_shape[1] > 0) {
+            out_channels = static_cast<int>(out_shape[1]);
+        }
         grid_h_ = static_cast<int>(out_shape[2]);
         grid_w_ = static_cast<int>(out_shape[3]);
     } else {
@@ -66,7 +73,10 @@ OrtBackend::OrtBackend(const std::string& onnx_path,
         grid_w_ = input_w_ / 16;
     }
 
-    // Pre-allocate contiguous NCHW float buffer & bind persistent Ort::Value wrapper
+    // Precompute separable letterbox/bilinear LUT for standard camera geometry (zero alloc in infer())
+    preprocess_plan_.configure(core::kCameraWidth, core::kCameraHeight, input_w_, input_h_);
+
+    // Pre-allocate contiguous NCHW input & output float buffers and bind persistent Ort::Value wrappers
     input_nchw_buffer_.resize(static_cast<std::size_t>(3) * input_h_ * input_w_, 0.0f);
     const std::array<int64_t, 4> in_shape{1, 3, input_h_, input_w_};
     input_tensor_ = Ort::Value::CreateTensor<float>(
@@ -76,13 +86,21 @@ OrtBackend::OrtBackend(const std::string& onnx_path,
         in_shape.data(),
         in_shape.size());
 
+    output_nchw_buffer_.resize(static_cast<std::size_t>(out_channels) * grid_h_ * grid_w_, 0.0f);
+    const std::array<int64_t, 4> out_tensor_shape{1, out_channels, grid_h_, grid_w_};
+    output_tensor_ = Ort::Value::CreateTensor<float>(
+        mem_info_,
+        output_nchw_buffer_.data(),
+        output_nchw_buffer_.size(),
+        out_tensor_shape.data(),
+        out_tensor_shape.size());
+
     // Warm up execution provider (triggers CoreML / XNNPACK / CUDA kernel compilation)
     for (int i = 0; i < 5; ++i) {
-        auto warmup_out = session_->Run(
-            Ort::RunOptions{nullptr},
+        session_->Run(
+            run_options_,
             input_names_.data(), &input_tensor_, 1,
-            output_names_.data(), 1);
-        (void)warmup_out;
+            output_names_.data(), &output_tensor_, 1);
     }
 }
 
@@ -92,34 +110,36 @@ core::Detection2D OrtBackend::infer(
     int src_height,
     BackendTimingsUs& out_timings) {
 
-    const LetterboxMeta meta = compute_letterbox_meta(src_width, src_height, input_w_, input_h_);
+    if (preprocess_plan_.meta().src_w != src_width ||
+        preprocess_plan_.meta().src_h != src_height) {
+        preprocess_plan_.configure(src_width, src_height, input_w_, input_h_);
+    }
+    const LetterboxMeta& meta = preprocess_plan_.meta();
 
     const uint64_t t0 = core::now_ns();
     {
         AEGIS_NVTX_RANGE("CPU_Preprocess_Letterbox");
-        cpu_preprocess_letterbox_nchw(rgb_hwc, meta, input_nchw_buffer_.data());
+        preprocess_plan_.execute(rgb_hwc, input_nchw_buffer_.data());
     }
     const uint64_t t1 = core::now_ns();
 
-    Ort::Value output_tensor{nullptr};
     {
         AEGIS_NVTX_RANGE("ORT_Session_Run");
-        auto outputs = session_->Run(
-            Ort::RunOptions{nullptr},
+        session_->Run(
+            run_options_,
             input_names_.data(),
             &input_tensor_,
             1,
             output_names_.data(),
+            &output_tensor_,
             1);
-        output_tensor = std::move(outputs[0]);
     }
     const uint64_t t2 = core::now_ns();
 
     out_timings.preprocess_us = static_cast<double>(t1 - t0) * 1e-3;
     out_timings.inference_us  = static_cast<double>(t2 - t1) * 1e-3;
 
-    const float* out_ptr = output_tensor.GetTensorData<float>();
-    return decode_anchor_free_grid(out_ptr, grid_h_, grid_w_, meta);
+    return decode_anchor_free_grid(output_nchw_buffer_.data(), grid_h_, grid_w_, meta);
 }
 
 }  // namespace aegis::backends

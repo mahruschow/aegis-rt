@@ -33,6 +33,9 @@ public:
                int input_height = 320,
                int intra_op_threads = 2);
 
+    OrtBackend(const OrtBackend&) = delete;
+    OrtBackend& operator=(const OrtBackend&) = delete;
+
     [[nodiscard]] std::string name() const override { return backend_name_; }
 
     [[nodiscard]] core::Detection2D infer(
@@ -50,6 +53,7 @@ private:
 
     Ort::Env env_;
     Ort::SessionOptions session_opts_;
+    Ort::RunOptions run_options_{nullptr};
     std::unique_ptr<Ort::Session> session_;
     Ort::MemoryInfo mem_info_;
 
@@ -58,9 +62,12 @@ private:
     std::array<const char*, 1> input_names_{};
     std::array<const char*, 1> output_names_{};
 
-    // Pre-allocated input tensor buffer — zero heap allocations during infer()
+    // Pre-allocated input/output tensor buffers & LUT plan — zero heap allocations during infer()
+    CpuPreprocessPlan preprocess_plan_{};
     std::vector<float> input_nchw_buffer_;
+    std::vector<float> output_nchw_buffer_;
     Ort::Value input_tensor_{nullptr};
+    Ort::Value output_tensor_{nullptr};
 };
 
 }  // namespace aegis::backends
