@@ -102,7 +102,7 @@
 
     /* Interactive Latency Explorer */
     .bar-wrap { margin: 1rem 0; }
-    .bar-label { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 0.35rem; }
+    .bar-label { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 0.35rem; gap: 0.75rem; flex-wrap: wrap; }
     .bar-track {
       height: 26px;
       background: rgba(2, 6, 23, 0.8);
@@ -113,6 +113,64 @@
     }
     .seg-pre { background: #3b82f6; height: 100%; transition: width 0.35s ease; }
     .seg-inf { background: #10b981; height: 100%; transition: width 0.35s ease; }
+    .seg-ctl { background: #f59e0b; height: 100%; transition: width 0.35s ease; }
+    .legend-row { display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: 0.82rem; color: var(--muted); margin-top: 0.5rem; }
+    .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 0.35rem; vertical-align: middle; }
+
+    /* Interactive Control & Estimation Lab */
+    .lab-grid { display: grid; grid-template-columns: 1.45fr 1fr; gap: 1.35rem; align-items: start; }
+    @media (max-width: 900px) { .lab-grid { grid-template-columns: 1fr; } }
+    canvas.lab-canvas {
+      width: 100%;
+      height: auto;
+      display: block;
+      background: radial-gradient(circle at center, #0b1324 0%, #030712 100%);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 0.75rem;
+    }
+    .control-panel { display: flex; flex-direction: column; gap: 0.85rem; }
+    .slider-group {
+      background: rgba(2, 6, 23, 0.65);
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      border-radius: 0.65rem;
+      padding: 0.75rem 0.9rem;
+    }
+    .slider-hdr { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 0.4rem; }
+    .slider-hdr strong { color: var(--accent); font-variant-numeric: tabular-nums; }
+    input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+    .action-row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+    .action-btn {
+      padding: 0.5rem 0.9rem;
+      border-radius: 0.5rem;
+      border: 1px solid var(--border);
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.84rem;
+    }
+    .action-btn:hover { background: rgba(56, 189, 248, 0.24); }
+    .action-btn.warn { border-color: rgba(245, 158, 11, 0.45); background: rgba(245, 158, 11, 0.12); color: #fde68a; }
+    .math-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-top: 1.25rem; }
+    .math-card {
+      background: rgba(2, 6, 23, 0.65);
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      border-radius: 0.75rem;
+      padding: 1rem 1.1rem;
+    }
+    .math-card h4 { font-size: 0.95rem; color: var(--accent); margin-bottom: 0.4rem; }
+    .math-card p { font-size: 0.86rem; color: var(--muted); }
+    .eq {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.8rem;
+      color: #e2e8f0;
+      background: rgba(15, 23, 42, 0.9);
+      padding: 0.45rem 0.6rem;
+      border-radius: 0.45rem;
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      margin-top: 0.5rem;
+      overflow-x: auto;
+    }
 
     /* About Me Section */
     .about-grid { display: grid; grid-template-columns: 1fr 1.6fr; gap: 1.75rem; }
@@ -147,7 +205,7 @@
     <section>
       <h2>Interactive Multi-Vehicle Showcase</h2>
       <div class="card">
-        <div class="tabs">
+        <div class="tabs" id="tabs-vehicle">
           <button class="tab-btn active" onclick="selectVehicle('drone', this)">6-DOF Quadrotor Drone (UAV)</button>
           <button class="tab-btn" onclick="selectVehicle('rover', this)">4-Wheel Ackermann Rover (UGV)</button>
         </div>
@@ -174,24 +232,114 @@
       <h2>Interactive Amdahl's Law Bottleneck Explorer</h2>
       <div class="card">
         <p style="color:var(--muted); margin-bottom:1rem;">
-          Click a hardware backend below to inspect why accelerating neural inference <strong>9.6x</strong> shifts host CPU image preprocessing from 4.3% to <strong>~30% of total frame time</strong>—motivating our custom fused CUDA kernel (<code>src/kernels/preprocess.cu</code>).
+          Click a hardware backend below to inspect why accelerating neural inference <strong>9.6x</strong> shifts host CPU image preprocessing from 4.3% to <strong>~30% of total frame time</strong>—motivating both our <strong>Separable 1D Bilinear LUT</strong> (<code>CpuPreprocessPlan</code>) + zero-alloc pre-bound ORT tensors on CPU/ANE and our custom fused CUDA kernel (<code>src/kernels/preprocess.cu</code>) on GPU.
         </p>
-        <div class="tabs">
+        <div class="tabs" id="tabs-backend">
           <button class="tab-btn active" onclick="setBackend('cpu', this)">ORT-CPU (FP32)</button>
           <button class="tab-btn" onclick="setBackend('ane', this)">Apple CoreML (ANE)</button>
           <button class="tab-btn" onclick="setBackend('trt', this)">Fused CUDA + TensorRT INT8 (Target)</button>
         </div>
         <div class="bar-wrap">
           <div class="bar-label">
-            <span id="b-title">ORT-CPU-FP32 (Total p50: 5.79 ms / 16.67 ms 60Hz Budget)</span>
+            <span id="b-title">ORT-CPU-FP32 (Pre: 0.25 ms | Inf: 5.53 ms | Ctl: 0.001 ms | p99: 7.05 ms)</span>
             <span id="b-share" style="color:var(--accent);">Preprocess Share: 4.3%</span>
           </div>
           <div class="bar-track">
-            <div id="seg-pre" class="seg-pre" style="width: 4.0%;" title="Preprocess"></div>
-            <div id="seg-inf" class="seg-inf" style="width: 85.0%;" title="Inference"></div>
+            <div id="seg-pre" class="seg-pre" style="width: 1.5%;" title="Preprocess"></div>
+            <div id="seg-inf" class="seg-inf" style="width: 33.2%;" title="Inference"></div>
+            <div id="seg-ctl" class="seg-ctl" style="width: 0.4%;" title="Kalman + SE(3) Control"></div>
+          </div>
+          <div class="legend-row">
+            <span><span class="legend-dot" style="background:#3b82f6;"></span>Preprocess (Letterbox + NCHW)</span>
+            <span><span class="legend-dot" style="background:#10b981;"></span>Neural Inference (AegisNanoDetector)</span>
+            <span><span class="legend-dot" style="background:#f59e0b;"></span>Kalman + SE(3) / Ackermann Control (0.001 ms)</span>
+            <span style="margin-left:auto;">Full Track = 16.67 ms (60 Hz Deadline)</span>
           </div>
         </div>
         <img class="full-plot" src="media/aegis_benchmark_report.png" alt="Aegis-RT Telemetry Benchmark Plots" />
+      </div>
+    </section>
+
+    <section>
+      <h2>Interactive Control &amp; State-Estimation Lab</h2>
+      <div class="card">
+        <p style="color:var(--muted); margin-bottom:1rem;">
+          Explore the exact real-time algorithms running inside <code>src/control/</code>: switch between the
+          <strong>Tangential Vortex Potential-Field Avoidance</strong> simulator and the <strong>Adaptive NIS Kalman Tracker</strong>.
+        </p>
+        <div class="tabs" id="tabs-lab">
+          <button class="tab-btn active" onclick="setLabMode('vortex', this)">1. Vortex Potential-Field Pursuit</button>
+          <button class="tab-btn" onclick="setLabMode('kalman', this)">2. Adaptive NIS Kalman &amp; Outlier Gate</button>
+        </div>
+
+        <div id="lab-vortex" class="lab-grid">
+          <canvas id="canvas-vortex" class="lab-canvas" width="640" height="400"></canvas>
+          <div class="control-panel">
+            <div class="slider-group">
+              <div class="slider-hdr"><span>Vortex Curl Ratio (&beta;)</span><strong id="val-vortex">0.55</strong></div>
+              <input id="sl-vortex" type="range" min="0" max="1.0" step="0.05" value="0.55" />
+              <p style="font-size:0.78rem; color:var(--muted); margin-top:0.35rem;">
+                Set &beta; = 0.00 to observe a pure radial field stall behind collinear pillars; &beta; = 0.55 matches <code>obstacle_vortex_ratio</code> in <code>controller.hpp</code>.
+              </p>
+            </div>
+            <div class="slider-group">
+              <div class="slider-hdr"><span>Standoff Distance</span><strong id="val-standoff">2.60 m</strong></div>
+              <input id="sl-standoff" type="range" min="1.4" max="3.8" step="0.1" value="2.6" />
+            </div>
+            <div class="stat-grid" style="margin-top:0;">
+              <div class="stat-box"><div id="v-clear" class="stat-val">1.12 m</div><div class="stat-lbl">Min Pillar Clearance</div></div>
+              <div class="stat-box"><div id="v-speed" class="stat-val">1.84 m/s</div><div class="stat-lbl">UAV Cruise Speed</div></div>
+            </div>
+            <div class="action-row">
+              <button class="action-btn" onclick="resetVortexSim('collinear')">Collinear Saddle Test</button>
+              <button class="action-btn" onclick="resetVortexSim('lissajous')">Figure-8 Gauntlet</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="lab-kalman" class="lab-grid" style="display:none;">
+          <canvas id="canvas-kalman" class="lab-canvas" width="640" height="400"></canvas>
+          <div class="control-panel">
+            <div class="slider-group">
+              <div class="slider-hdr"><span>Perception Delay (&Delta;t)</span><strong id="val-delay">15 ms</strong></div>
+              <input id="sl-delay" type="range" min="0" max="60" step="1" value="15" />
+              <p style="font-size:0.78rem; color:var(--muted); margin-top:0.35rem;">
+                Compensates measurement Jacobian <code>H = [I, -&Delta;t&middot;I]</code> so fast targets don't lag behind true state.
+              </p>
+            </div>
+            <div class="slider-group">
+              <div class="slider-hdr"><span>Mahalanobis &chi;&sup2; Gate (3-DOF)</span><strong id="val-chi2">16.27</strong></div>
+              <input id="sl-chi2" type="range" min="4.0" max="25.0" step="0.25" value="16.27" />
+            </div>
+            <div class="stat-grid" style="margin-top:0;">
+              <div class="stat-box"><div id="k-nis" class="stat-val">0.82</div><div class="stat-lbl">Live NIS (d&sup2;)</div></div>
+              <div class="stat-box"><div id="k-qscale" class="stat-val">1.00x</div><div class="stat-lbl">Adaptive Q Scale</div></div>
+            </div>
+            <div class="action-row">
+              <button class="action-btn warn" onclick="triggerKalmanGlitch()">Inject +2.4m Outlier</button>
+              <button class="action-btn" onclick="triggerKalmanJink()">Trigger Evasive Jink</button>
+              <button class="action-btn" onclick="resetKalmanSim()">Reset Filter</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="math-grid">
+          <div class="math-card">
+            <h4>Latency-Compensated Joseph KF</h4>
+            <p>Back-propagates capture state via exact delay Jacobian, gates outliers by Mahalanobis &chi;&sup2;, and boosts Q on maneuvers.</p>
+            <div class="eq">H = [I&#8323;, -&Delta;t&middot;I&#8323;],  P = (I-KH)P(I-KH)&#7488; + KRK&#7488;</div>
+          </div>
+          <div class="math-card">
+            <h4>Geometric SE(3) + Desaturation</h4>
+            <p>Maps desired thrust vector onto SO(3) attitude error and preserves roll/pitch authority before collective/yaw clamping.</p>
+            <div class="eq">e&#7523; = &frac12;(R&#7496;&#7488;R - R&#7488;R&#7496;)&or;,  f&#7522; &isin; [0.2, 7.5] N</div>
+          </div>
+          <div class="math-card">
+            <h4>Ackermann Pure-Pursuit</h4>
+            <p>Computes exact inner/outer front wheel angles around the instantaneous turning center plus rear torque vectoring.</p>
+            <div class="eq">&delta;&#737;,&#7523; = atan(W&middot;tan&delta; / (W &mp; &frac12;T&middot;tan&delta;))</div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -246,7 +394,7 @@
       }
     };
     function selectVehicle(key, btn) {
-      document.querySelectorAll('.tabs')[0].querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('tabs-vehicle').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       const v = vehicles[key];
       document.getElementById('veh-gif').src = v.gif;
@@ -257,20 +405,437 @@
       document.getElementById('st-rmse').textContent = v.rmse;
       document.getElementById('st-det').textContent = v.det;
     }
+
     const backends = {
-      cpu: { title: "ORT-CPU-FP32 (Pre: 0.25 ms | Inf: 5.53 ms | p99: 7.05 ms)", share: "Preprocess Share: 4.3%", preW: "4%", infW: "84%" },
-      ane: { title: "ORT-CoreML-ANE (Pre: 0.25 ms | Inf: 0.58 ms | p99: 1.33 ms)", share: "Preprocess Share: 29.8% (Host Bottleneck!)", preW: "4%", infW: "9.5%" },
-      trt: { title: "Fused CUDA Kernel + TensorRT INT8 (4x Less PCIe Traffic + Zero-Copy Ready)", share: "Host CPU Bottleneck Eliminated", preW: "0.8%", infW: "4.5%" }
+      cpu: {
+        title: "ORT-CPU-FP32 (Pre: 0.25 ms | Inf: 5.53 ms | Ctl: 0.001 ms | p99: 7.05 ms)",
+        share: "Preprocess Share: 4.3%",
+        preW: "1.5%", infW: "33.2%", ctlW: "0.4%"
+      },
+      ane: {
+        title: "ORT-CoreML-ANE (Pre: 0.25 ms | Inf: 0.58 ms | Ctl: 0.001 ms | p99: 1.33 ms)",
+        share: "Preprocess Share: 29.8% (Host Bottleneck!)",
+        preW: "1.5%", infW: "3.5%", ctlW: "0.4%"
+      },
+      trt: {
+        title: "Fused CUDA Kernel + TensorRT INT8 (4x Less PCIe Traffic + Zero-Copy Ready)",
+        share: "Host CPU Bottleneck Eliminated",
+        preW: "0.4%", infW: "1.8%", ctlW: "0.4%"
+      }
     };
     function setBackend(key, btn) {
-      document.querySelectorAll('.tabs')[1].querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('tabs-backend').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       const b = backends[key];
       document.getElementById('b-title').textContent = b.title;
       document.getElementById('b-share').textContent = b.share;
       document.getElementById('seg-pre').style.width = b.preW;
       document.getElementById('seg-inf').style.width = b.infW;
+      document.getElementById('seg-ctl').style.width = b.ctlW;
     }
+
+    // --- Interactive Control & Estimation Lab ---
+    let activeLab = 'vortex';
+    function setLabMode(mode, btn) {
+      activeLab = mode;
+      document.getElementById('tabs-lab').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('lab-vortex').style.display = (mode === 'vortex') ? 'grid' : 'none';
+      document.getElementById('lab-kalman').style.display = (mode === 'kalman') ? 'grid' : 'none';
+    }
+
+    // 1. Vortex Potential-Field Simulator (mirrors QuadrotorController::compute_command)
+    const vCanvas = document.getElementById('canvas-vortex');
+    const vCtx = vCanvas.getContext('2d');
+    const slVortex = document.getElementById('sl-vortex');
+    const slStandoff = document.getElementById('sl-standoff');
+    slVortex.addEventListener('input', () => {
+      document.getElementById('val-vortex').textContent = Number(slVortex.value).toFixed(2);
+    });
+    slStandoff.addEventListener('input', () => {
+      document.getElementById('val-standoff').textContent = Number(slStandoff.value).toFixed(2) + " m";
+    });
+
+    const vSim = {
+      scenario: 'collinear',
+      t: 0,
+      drone: { x: -2.8, y: 0.0, vx: 0.0, vy: 0.0, trail: [] },
+      target: { x: 2.8, y: 0.0, vx: 0.0, vy: 0.0 },
+      obstacles: [{ x: 0.0, y: 0.0, r: 0.35 }]
+    };
+
+    function resetVortexSim(scenario) {
+      vSim.scenario = scenario;
+      vSim.t = 0;
+      vSim.drone = { x: -2.9, y: 0.0, vx: 0.0, vy: 0.0, trail: [] };
+      if (scenario === 'collinear') {
+        vSim.target = { x: 2.9, y: 0.0, vx: 0.0, vy: 0.0 };
+        vSim.obstacles = [{ x: -0.2, y: 0.0, r: 0.38 }];
+      } else {
+        vSim.obstacles = [
+          { x: -0.8, y: 0.55, r: 0.34 },
+          { x: 0.9, y: -0.55, r: 0.34 },
+          { x: 0.1, y: 0.0, r: 0.30 }
+        ];
+      }
+    }
+
+    function computeRepulsiveVortex(px, py, tx, ty, obstacles, vortexRatio) {
+      const influence = 1.35;
+      const gain = 3.2;
+      const gx = tx - px, gy = ty - py;
+      const gd = Math.hypot(gx, gy);
+      const gHatX = gd > 1e-3 ? gx / gd : 0.0;
+      const gHatY = gd > 1e-3 ? gy / gd : 0.0;
+      let ax = 0.0, ay = 0.0, minClear = 99.0;
+      for (const obs of obstacles) {
+        const dx = px - obs.x, dy = py - obs.y;
+        const cd = Math.hypot(dx, dy);
+        const sd = Math.max(0.05, cd - obs.r);
+        minClear = Math.min(minClear, sd);
+        if (sd < influence && cd > 1e-4) {
+          const invD = 1.0 / sd;
+          const invD0 = 1.0 / influence;
+          const mag = Math.min(6.0, gain * (invD - invD0) * invD * invD);
+          const rx = dx / cd, ry = dy / cd;
+          ax += mag * rx;
+          ay += mag * ry;
+          if (gd > 1e-3 && vortexRatio > 0.0) {
+            const approachDot = rx * gHatX + ry * gHatY;
+            if (approachDot < 0.0) {
+              const ccwDot = (-ry) * gHatX + rx * gHatY;
+              const sign = ccwDot >= 0.0 ? 1.0 : -1.0;
+              const vMag = vortexRatio * mag * (-approachDot);
+              ax += vMag * sign * (-ry);
+              ay += vMag * sign * rx;
+            }
+          }
+        }
+      }
+      return { ax, ay, minClear };
+    }
+
+    function stepVortexSim(dt) {
+      vSim.t += dt;
+      if (vSim.scenario === 'lissajous') {
+        const w = 0.55;
+        vSim.target.x = 2.0 * Math.sin(w * vSim.t);
+        vSim.target.y = 1.45 * Math.sin(2.0 * w * vSim.t);
+        vSim.target.vx = 2.0 * w * Math.cos(w * vSim.t);
+        vSim.target.vy = 2.9 * w * Math.cos(2.0 * w * vSim.t);
+      }
+
+      const standoff = Number(slStandoff.value);
+      const vortexRatio = Number(slVortex.value);
+      const dxT = vSim.target.x - vSim.drone.x;
+      const dyT = vSim.target.y - vSim.drone.y;
+      const dT = Math.hypot(dxT, dyT);
+      let desX = vSim.drone.x, desY = vSim.drone.y;
+      if (dT > 1e-3) {
+        desX = vSim.target.x - (dxT / dT) * standoff;
+        desY = vSim.target.y - (dyT / dT) * standoff;
+      }
+
+      const rep = computeRepulsiveVortex(
+        vSim.drone.x, vSim.drone.y, vSim.target.x, vSim.target.y, vSim.obstacles, vortexRatio
+      );
+      let vxCmd = 3.8 * (desX - vSim.drone.x) + vSim.target.vx * 0.9;
+      let vyCmd = 3.8 * (desY - vSim.drone.y) + vSim.target.vy * 0.9;
+      const vNorm = Math.hypot(vxCmd, vyCmd);
+      if (vNorm > 4.5) { vxCmd *= 4.5 / vNorm; vyCmd *= 4.5 / vNorm; }
+
+      const ax = 2.9 * (vxCmd - vSim.drone.vx) + rep.ax;
+      const ay = 2.9 * (vyCmd - vSim.drone.vy) + rep.ay;
+      vSim.drone.vx += ax * dt;
+      vSim.drone.vy += ay * dt;
+      vSim.drone.x += vSim.drone.vx * dt;
+      vSim.drone.y += vSim.drone.vy * dt;
+
+      if (vSim.drone.trail.length === 0 ||
+          Math.hypot(vSim.drone.x - vSim.drone.trail[vSim.drone.trail.length - 1].x,
+                     vSim.drone.y - vSim.drone.trail[vSim.drone.trail.length - 1].y) > 0.05) {
+        vSim.drone.trail.push({ x: vSim.drone.x, y: vSim.drone.y });
+        if (vSim.drone.trail.length > 160) vSim.drone.trail.shift();
+      }
+
+      if (activeLab === 'vortex') {
+        document.getElementById('v-clear').textContent = rep.minClear.toFixed(2) + " m";
+        document.getElementById('v-speed').textContent = Math.hypot(vSim.drone.vx, vSim.drone.vy).toFixed(2) + " m/s";
+      }
+    }
+
+    function drawVortexSim() {
+      const w = vCanvas.width, h = vCanvas.height;
+      const scale = 72;
+      const toPx = (x, y) => [w * 0.5 + x * scale, h * 0.5 - y * scale];
+
+      vCtx.clearRect(0, 0, w, h);
+      // Grid
+      vCtx.strokeStyle = "rgba(148, 163, 184, 0.08)";
+      vCtx.lineWidth = 1;
+      for (let gx = -4; gx <= 4; gx++) {
+        const [px] = toPx(gx, 0);
+        vCtx.beginPath(); vCtx.moveTo(px, 0); vCtx.lineTo(px, h); vCtx.stroke();
+      }
+      for (let gy = -2; gy <= 2; gy++) {
+        const [, py] = toPx(0, gy);
+        vCtx.beginPath(); vCtx.moveTo(0, py); vCtx.lineTo(w, py); vCtx.stroke();
+      }
+
+      // Vector field around obstacles
+      const vortexRatio = Number(slVortex.value);
+      vCtx.strokeStyle = "rgba(56, 189, 248, 0.35)";
+      for (let wx = -3.6; wx <= 3.6; wx += 0.45) {
+        for (let wy = -2.2; wy <= 2.2; wy += 0.45) {
+          const rep = computeRepulsiveVortex(wx, wy, vSim.target.x, vSim.target.y, vSim.obstacles, vortexRatio);
+          const mag = Math.hypot(rep.ax, rep.ay);
+          if (mag > 0.08) {
+            const len = Math.min(18, mag * 4.5);
+            const [sx, sy] = toPx(wx, wy);
+            vCtx.beginPath();
+            vCtx.moveTo(sx, sy);
+            vCtx.lineTo(sx + (rep.ax / mag) * len, sy - (rep.ay / mag) * len);
+            vCtx.stroke();
+          }
+        }
+      }
+
+      // Obstacles + influence ring
+      for (const obs of vSim.obstacles) {
+        const [ox, oy] = toPx(obs.x, obs.y);
+        vCtx.beginPath();
+        vCtx.arc(ox, oy, (obs.r + 1.35) * scale, 0, Math.PI * 2);
+        vCtx.strokeStyle = "rgba(245, 158, 11, 0.22)";
+        vCtx.setLineDash([4, 4]);
+        vCtx.stroke();
+        vCtx.setLineDash([]);
+
+        vCtx.beginPath();
+        vCtx.arc(ox, oy, obs.r * scale, 0, Math.PI * 2);
+        vCtx.fillStyle = "rgba(245, 158, 11, 0.28)";
+        vCtx.fill();
+        vCtx.strokeStyle = "#f59e0b";
+        vCtx.lineWidth = 2;
+        vCtx.stroke();
+      }
+
+      // Trail
+      if (vSim.drone.trail.length > 1) {
+        vCtx.beginPath();
+        vSim.drone.trail.forEach((pt, idx) => {
+          const [px, py] = toPx(pt.x, pt.y);
+          if (idx === 0) vCtx.moveTo(px, py); else vCtx.lineTo(px, py);
+        });
+        vCtx.strokeStyle = "rgba(16, 185, 129, 0.7)";
+        vCtx.lineWidth = 2.5;
+        vCtx.stroke();
+      }
+
+      // Target beacon + standoff circle
+      const [tx, ty] = toPx(vSim.target.x, vSim.target.y);
+      vCtx.beginPath();
+      vCtx.arc(tx, ty, Number(slStandoff.value) * scale, 0, Math.PI * 2);
+      vCtx.strokeStyle = "rgba(239, 68, 68, 0.22)";
+      vCtx.setLineDash([5, 5]);
+      vCtx.stroke();
+      vCtx.setLineDash([]);
+
+      vCtx.beginPath();
+      vCtx.arc(tx, ty, 10, 0, Math.PI * 2);
+      vCtx.fillStyle = "#ef4444";
+      vCtx.fill();
+
+      // Quadrotor UAV
+      const [ux, uy] = toPx(vSim.drone.x, vSim.drone.y);
+      vCtx.beginPath();
+      vCtx.arc(ux, uy, 11, 0, Math.PI * 2);
+      vCtx.fillStyle = "#10b981";
+      vCtx.fill();
+      vCtx.strokeStyle = "#ecfdf5";
+      vCtx.lineWidth = 2;
+      vCtx.stroke();
+    }
+
+    // 2. Adaptive NIS Kalman Tracker Simulator (1D cross-section of latency-compensated H=[1, -delay] & Joseph update)
+    const kCanvas = document.getElementById('canvas-kalman');
+    const kCtx = kCanvas.getContext('2d');
+    const slDelay = document.getElementById('sl-delay');
+    const slChi2 = document.getElementById('sl-chi2');
+    slDelay.addEventListener('input', () => {
+      document.getElementById('val-delay').textContent = slDelay.value + " ms";
+    });
+    slChi2.addEventListener('input', () => {
+      document.getElementById('val-chi2').textContent = Number(slChi2.value).toFixed(2);
+    });
+
+    const kSim = {
+      t: 0,
+      truePos: 0,
+      trueVel: 1.35,
+      x: [0, 1.35],
+      P: [[0.25, 0], [0, 2.0]],
+      qScale: 1.0,
+      lastNis: 0.0,
+      pendingGlitch: false,
+      history: []
+    };
+
+    function resetKalmanSim() {
+      kSim.t = 0;
+      kSim.truePos = 0;
+      kSim.trueVel = 1.35;
+      kSim.x = [0, 1.35];
+      kSim.P = [[0.25, 0], [0, 2.0]];
+      kSim.qScale = 1.0;
+      kSim.lastNis = 0.0;
+      kSim.history = [];
+    }
+    function triggerKalmanGlitch() { kSim.pendingGlitch = true; }
+    function triggerKalmanJink() { kSim.trueVel = -kSim.trueVel; }
+
+    function stepKalmanSim(dt) {
+      kSim.t += dt;
+      kSim.truePos += kSim.trueVel * dt;
+      if (Math.abs(kSim.truePos) > 2.8) kSim.trueVel = -kSim.trueVel;
+
+      // Predict: x = F x, P = F P F^T + Q
+      kSim.x[0] += kSim.x[1] * dt;
+      const p00 = kSim.P[0][0] + dt * (kSim.P[1][0] + kSim.P[0][1]) + dt * dt * kSim.P[1][1] + 0.02 * dt;
+      const p01 = kSim.P[0][1] + dt * kSim.P[1][1];
+      const p10 = kSim.P[1][0] + dt * kSim.P[1][1];
+      const p11 = kSim.P[1][1] + (0.25 * kSim.qScale) * dt;
+      kSim.P = [[p00, p01], [p10, p11]];
+
+      // Delayed noisy measurement
+      const delayS = Number(slDelay.value) * 1e-3;
+      const noise = (Math.random() - 0.5) * 0.14;
+      let z = (kSim.truePos - kSim.trueVel * delayS) + noise;
+      let injectedGlitch = false;
+      if (kSim.pendingGlitch) {
+        z += 2.4;
+        kSim.pendingGlitch = false;
+        injectedGlitch = true;
+      }
+
+      // H = [1, -delayS]
+      const h0 = 1.0, h1 = -delayS;
+      const zPred = h0 * kSim.x[0] + h1 * kSim.x[1];
+      const y = z - zPred;
+      const ph0 = kSim.P[0][0] * h0 + kSim.P[0][1] * h1;
+      const ph1 = kSim.P[1][0] * h0 + kSim.P[1][1] * h1;
+      const R = 0.015;
+      const S = h0 * ph0 + h1 * ph1 + R;
+      const nis = (y * y) / Math.max(1e-9, S);
+      kSim.lastNis = nis;
+
+      // 1-DOF scaled chi2 threshold relative to 3-DOF slider
+      const gate = Number(slChi2.value) * 0.55;
+      let accepted = true;
+      if (Math.abs(y) > 3.5 || nis > gate) {
+        accepted = false;
+      } else {
+        if (nis > 2.2) {
+          kSim.qScale = Math.max(kSim.qScale, Math.min(8.0, nis / 2.2));
+        } else {
+          kSim.qScale = 1.0 + 0.88 * (kSim.qScale - 1.0);
+        }
+        const k0 = ph0 / S, k1 = ph1 / S;
+        kSim.x[0] += k0 * y;
+        kSim.x[1] += k1 * y;
+
+        // Joseph update (I - K H) P (I - K H)^T + K R K^T
+        const a00 = 1 - k0 * h0, a01 = -k0 * h1;
+        const a10 = -k1 * h0, a11 = 1 - k1 * h1;
+        const ap00 = a00 * kSim.P[0][0] + a01 * kSim.P[1][0];
+        const ap01 = a00 * kSim.P[0][1] + a01 * kSim.P[1][1];
+        const ap10 = a10 * kSim.P[0][0] + a11 * kSim.P[1][0];
+        const ap11 = a10 * kSim.P[0][1] + a11 * kSim.P[1][1];
+        kSim.P = [
+          [ap00 * a00 + ap01 * a01 + k0 * R * k0, ap00 * a10 + ap01 * a11 + k0 * R * k1],
+          [ap10 * a00 + ap11 * a01 + k1 * R * k0, ap10 * a10 + ap11 * a11 + k1 * R * k1]
+        ];
+      }
+
+      kSim.history.push({
+        truePos: kSim.truePos,
+        estPos: kSim.x[0],
+        meas: z,
+        accepted,
+        injectedGlitch,
+        qScale: kSim.qScale
+      });
+      if (kSim.history.length > 150) kSim.history.shift();
+
+      if (activeLab === 'kalman') {
+        document.getElementById('k-nis').textContent = kSim.lastNis.toFixed(2);
+        document.getElementById('k-qscale').textContent = kSim.qScale.toFixed(2) + "x";
+      }
+    }
+
+    function drawKalmanSim() {
+      const w = kCanvas.width, h = kCanvas.height;
+      kCtx.clearRect(0, 0, w, h);
+
+      const midY = h * 0.44;
+      const scaleY = 46;
+      const toX = (i) => (i / 150) * (w - 30) + 15;
+      const toY = (val) => midY - val * scaleY;
+
+      // Baseline grid
+      kCtx.strokeStyle = "rgba(148, 163, 184, 0.12)";
+      kCtx.beginPath(); kCtx.moveTo(15, midY); kCtx.lineTo(w - 15, midY); kCtx.stroke();
+
+      if (kSim.history.length < 2) return;
+
+      // True target trajectory (red)
+      kCtx.beginPath();
+      kSim.history.forEach((pt, idx) => {
+        const x = toX(idx), y = toY(pt.truePos);
+        if (idx === 0) kCtx.moveTo(x, y); else kCtx.lineTo(x, y);
+      });
+      kCtx.strokeStyle = "rgba(239, 68, 68, 0.85)";
+      kCtx.lineWidth = 2;
+      kCtx.stroke();
+
+      // Kalman estimate (emerald)
+      kCtx.beginPath();
+      kSim.history.forEach((pt, idx) => {
+        const x = toX(idx), y = toY(pt.estPos);
+        if (idx === 0) kCtx.moveTo(x, y); else kCtx.lineTo(x, y);
+      });
+      kCtx.strokeStyle = "#10b981";
+      kCtx.lineWidth = 2.6;
+      kCtx.stroke();
+
+      // Measurements & rejected outlier markers
+      kSim.history.forEach((pt, idx) => {
+        const x = toX(idx), y = toY(pt.meas);
+        kCtx.beginPath();
+        kCtx.arc(x, y, pt.accepted ? 2.2 : 5.5, 0, Math.PI * 2);
+        kCtx.fillStyle = pt.accepted ? "rgba(56, 189, 248, 0.65)" : "#f59e0b";
+        kCtx.fill();
+      });
+
+      // Bottom adaptive Q bar plot
+      const qBaseY = h - 22;
+      kCtx.fillStyle = "rgba(56, 189, 248, 0.45)";
+      kSim.history.forEach((pt, idx) => {
+        const barH = Math.min(58, (pt.qScale - 1.0) * 8.0 + 3);
+        kCtx.fillRect(toX(idx) - 1, qBaseY - barH, 3, barH);
+      });
+      kCtx.fillStyle = "#94a3b8";
+      kCtx.font = "11px ui-monospace, monospace";
+      kCtx.fillText("Red: Ground Truth  |  Green: Latency-Compensated KF  |  Amber: Rejected Outlier  |  Bars: Adaptive Q", 16, 20);
+    }
+
+    resetVortexSim('collinear');
+    resetKalmanSim();
+    setInterval(() => {
+      stepVortexSim(0.03);
+      stepKalmanSim(0.033);
+      if (activeLab === 'vortex') drawVortexSim();
+      else drawKalmanSim();
+    }, 33);
   </script>
 </body>
 </html>

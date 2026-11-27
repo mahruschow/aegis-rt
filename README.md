@@ -110,26 +110,53 @@ Standard `std::mutex` + `std::queue` pipelines suffer from OS scheduler wakeups 
 </details>
 
 <details>
-<summary><strong>2. Custom Fused 2D CUDA Kernel &amp; Jetson Zero-Copy (<code>src/kernels/preprocess.cu</code>)</strong></summary>
+<summary><strong>2. Custom Fused 2D CUDA Kernel, Separable CPU LUT &amp; Zero-Alloc Backends (<code>src/kernels/preprocess.cu</code>, <code>include/aegis/backends/i_backend.hpp</code>, <code>src/backends/ort_backend.cpp</code>)</strong></summary>
 <br />
 
 Instead of running OpenCV `cv::resize` + `cv::cvtColor` + `float32` conversion on the CPU and copying `1.2 MB` of `float32` tensors across PCIe:
-1. **4x PCIe Bandwidth Reduction:** Transfers compact raw `uint8_t` camera pixels via pinned DMA host memory (`cudaMallocHost`).
+1. **4x PCIe Bandwidth Reduction (GPU Path):** Transfers compact raw `uint8_t` camera pixels via pinned DMA host memory (`cudaMallocHost`).
 2. **Jetson Orin Unified Memory (`--jetson-zerocopy`):** Uses `cudaHostAllocMapped` so CPU camera capture and GPU CUDA threads address the **exact same physical LPDDR5 memory** with **0 bytes copied**.
-3. **Coalesced Planar Writes:** A single 2D thread block `(16, 16)` computes aspect-preserving letterbox bounds, sub-pixel bilinear interpolation via `__ldg()` read-only cache loads, `[0, 1]` normalization, and coalesced planar `CHW` global writes directly into TensorRT's bound input pointer (`< 1e-5` max diff vs. golden CPU reference).
+3. **Coalesced Planar Writes (`preprocess.cu`):** A single 2D thread block `(16, 16)` computes pixel-center-aligned aspect-preserving letterbox bounds, sub-pixel bilinear interpolation via `__ldg()` read-only cache loads, `[0, 1]` normalization, and coalesced planar `CHW` global writes directly into TensorRT's bound input pointer (`< 1e-5` max diff vs. golden CPU reference).
+4. **Separable 1D Bilinear LUT + Zero-Alloc ORT Binding (`CpuPreprocessPlan` &amp; `OrtBackend`):** On CPU and Apple CoreML/ANE targets, `CpuPreprocessPlan` precomputes horizontal and vertical bilinear lookup tables (folding `1/255` scaling into vertical weights and using `std::fill_n` for letterbox padding), while `OrtBackend` pre-binds persistent `Ort::Value` input and output tensors in the constructor so `infer()` executes with **zero heap allocations**.
 
 </details>
 
 <details>
-<summary><strong>3. Latency-Compensated 3D Kalman Filter &amp; Dual Vehicle Controllers (<code>src/control/</code>)</strong></summary>
+<summary><strong>3. Latency-Compensated Adaptive Kalman Filter &amp; Dual Vehicle Controllers (<code>src/control/</code>)</strong></summary>
 <br />
 
-* **OpenGL NDC Depth Linearization & Back-Projection:** Linearizes perspective depth $z_{\text{near}} / (1 - z_{\text{ndc}}(1 - z_{\text{near}}/z_{\text{far}}))$ and back-projects 2D bounding-box centroids through pinhole intrinsics and camera extrinsics into 3D world space.
-* **Perception Delay Compensation:** `KalmanTracker3D` compares camera measurements against back-propagated capture-time state $\hat{p}(t_{\text{cap}}) \approx \hat{p}(t) - \hat{v}(t)\Delta t_{\text{perc}}$ with a `3.5 m` innovation outlier gate.
-* **6-DOF Quadrotor (`controller.cpp`):** Geometric $SO(3)$ attitude error $e_R = \frac{1}{2}(R_d^T R - R^T R_d)^\vee$ + repulsive obstacle potential fields + 4-rotor X-frame mixer.
-* **4-Wheel Ackermann UGV (`rover_controller.cpp`):** Pure-Pursuit lookahead curvature $\kappa = 2 y_b / L_d^2$ + exact inner/outer Ackermann wheel angles $\delta_{L,R} = \arctan\!\left(\frac{W \tan\delta}{W \mp \frac{T}{2}\tan\delta}\right)$ + cornering-modulated rear torque vectoring.
+* **OpenGL NDC Depth Linearization &amp; Back-Projection (`mujoco_bridge.cpp`):** Linearizes perspective depth $z_{\text{near}} / (1 - z_{\text{ndc}}(1 - z_{\text{near}}/z_{\text{far}}))$ and back-projects the minimum valid depth in a $5\times 5$ patch around the 2D bounding-box centroid through pinhole intrinsics and camera extrinsics into 3D world space.
+* **Latency-Compensated Adaptive 3D Kalman Filter (`kalman_tracker.cpp`):**
+  * **Exact Delay Jacobian:** Accounts for perception latency $\Delta t = t_{\text{now}} - t_{\text{cap}}$ directly in both the innovation and measurement matrix $H = \begin{bmatrix} I_3 &amp; -\Delta t\, I_3 \end{bmatrix}$ so $\hat{z} = \hat{p}(t_{\text{now}}) - \Delta t\,\hat{v}(t_{\text{now}})$.
+  * **Dual Outlier Gating:** Enforces both a hard Euclidean jump ceiling (`3.5 m`) and a 3-DOF Mahalanobis $\chi^2$ statistical gate ($d^2 = y^T S^{-1} y &gt; 16.27$, $99.9\%$ confidence) that naturally widens during occlusion coasting as covariance $P$ grows.
+  * **NIS-Driven Adaptive $Q$ &amp; Joseph Update:** Boosts velocity process noise $Q_v$ up to $8\times$ when Normalized Innovation Squared ($\text{NIS}$) exceeds `4.50` during sudden evasive jinks (decaying at `0.88` per nominal update), and updates covariance via the symmetric Joseph form $P = (I - KH)P(I - KH)^T + KRK^T$ with zero heap allocations.
+* **6-DOF Quadrotor (`controller.cpp`):**
+  * **Geometric $SO(3)$ Attitude Control:** Tracks standoff pursuit setpoints using $e_R = \frac{1}{2}(R_d^T R - R^T R_d)^\vee$ and body-rate damping.
+  * **Vortex Potential-Field Avoidance:** Combines radial obstacle repulsion with a tangential vortex curl (`obstacle_vortex_ratio = 0.55`) when approaching collinear obstacles to break saddle-point local minima.
+  * **Priority-Preserving Rotor Desaturation:** Scales roll/pitch differential only if exceeding half actuator span, shifts collective thrust within `[0.2, 7.5] N` headroom to preserve roll/pitch authority, and clips yaw differential within remaining motor headroom.
+* **4-Wheel Ackermann UGV (`rover_controller.cpp`):** Pure-Pursuit lookahead curvature $\kappa = 2 y_b / L_d^2$, exact inner/outer Ackermann wheel angles $\delta_{L,R} = \arctan\!\left(\frac{W \tan\delta}{W \mp \frac{T}{2}\tan\delta}\right)$, cornering-speed modulation ($\cos\delta$), and rear differential torque vectoring.
 
 </details>
+
+---
+
+## Automated Unit Tests &amp; Numerical Parity (`ctest`)
+
+Every subsystem is covered by standalone C++20/CUDA verification targets wired into `CMakeLists.txt` (compiled cleanly with `-Wall -Wextra -Wpedantic -O3`):
+
+| Test Target | CTest Name | What It Verifies |
+| :--- | :--- | :--- |
+| `test_spsc_queue` | `SpscQueueLockFreeTest` | Ring wrap-around bounds + 500,000 concurrent cross-thread lock-free handoffs |
+| `test_kalman_control` | `KalmanAndSe3ControllerTest` | Latency-compensated KF convergence, Euclidean + Mahalanobis $\chi^2$ outlier gating, occlusion coasting, NIS adaptive $Q$, $SE(3)$ hover, tangential vortex deflection, priority-preserving rotor desaturation, and Ackermann inner/outer steering |
+| `test_letterbox_decode` | `LetterboxAndDecodeParityTest` | Aspect-preserving letterbox NCHW layout, anchor-free grid encode/decode round-trip (`< 1e-3 px`), `CpuPreprocessPlan` LUT parity (`< 1e-5` across aspect ratios), and LUT vs. scalar microbenchmark |
+| `test_ort_backend` | `OrtZeroAllocBackendTest` | Pre-bound `Ort::Value` zero-alloc inference determinism and dynamic resolution recovery across CPU and Apple CoreML |
+| `test_cuda_preprocess` | `CudaPreprocessParityTest` | *(When `AEGIS_ENABLE_CUDA=ON`)* FP32/FP16 CUDA kernel numerical parity (`< 1e-5`) vs. `cpu_preprocess_letterbox_nchw` |
+
+```bash
+cmake -S . -B build -G Ninja
+cmake --build build -j
+ctest --test-dir build --output-on-failure -V
+```
 
 ---
 
